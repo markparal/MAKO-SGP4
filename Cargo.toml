@@ -1,6 +1,10 @@
 [package]
-name = "Rusty-SGP4"
+name = "MAKO-SGP4"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

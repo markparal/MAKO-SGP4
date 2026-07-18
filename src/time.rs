@@ -28,7 +28,7 @@
 ///
 /// # Examples
 /// ```rust
-/// use Rusty_SGP4::time::{DateTime, Timezone};
+/// use crate::time::{DateTime, Timezone};
 ///
 /// let datetime = DateTime {
 ///     year: 2024,
@@ -40,7 +40,7 @@
 ///     timezone: Timezone::UTC,
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Copy)]
 pub struct DateTime {
     /// The year
     pub year: i32,
@@ -57,7 +57,7 @@ pub struct DateTime {
     /// The minute (0-59)
     pub minute: i32,
     
-    /// The second with fractional component (0.0-59.999...) TODO add milliseconds component
+    /// The second with fractional component (0.0–59.999…)
     pub second: f64,
     
     /// The timezone associated with this datetime
@@ -87,17 +87,18 @@ pub enum DateError {
 ///
 /// # Examples
 /// ```rust
-/// use Rusty_SGP4::time::Timezone;
+/// use crate::time::Timezone;
 ///
 /// let tz_utc = Timezone::UTC;
 /// let tz_ut1 = Timezone::UT1;
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Timezone {
     /// Coordinated Universal Time (UTC)
     /// 
     /// UTC is the primary time standard by which the world regulates clocks and time.
     /// It is within about 1 second of mean solar time at 0° longitude.
+    #[default]
     UTC,
     
     /// Universal Time 1 (UT1)
@@ -137,8 +138,8 @@ pub enum Timezone {
 ///
 /// # Examples
 /// ```rust
-/// use Rusty_SGP4::time::utc2jday;
-/// use Rusty_SGP4::time::{DateTime, Timezone};
+/// use crate::time::utc2jday;
+/// use crate::time::{DateTime, Timezone};
 ///
 /// let datetime = DateTime {
 ///     year: 2024,
@@ -195,8 +196,8 @@ pub fn utc2jday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
 ///
 /// # Examples
 /// ```rust
-/// use Rusty_SGP4::time::utc2mjday;
-/// use Rusty_SGP4::time::{DateTime, Timezone};
+/// use crate::time::utc2mjday;
+/// use crate::time::{DateTime, Timezone};
 ///
 /// let datetime = DateTime {
 ///     year: 2024,
@@ -278,7 +279,7 @@ pub fn utc2mjday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
 ///
 /// # Examples
 /// ```rust
-/// use Rusty_SGP4::time::dayofyr2utc;
+/// use crate::time::dayofyr2utc;
 ///
 /// // Day 123.5 of 2024 = May 2nd, 2024 at 12:00:00
 /// let datetime = dayofyr2utc(2024, 123.5)?;

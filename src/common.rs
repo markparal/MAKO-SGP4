@@ -19,7 +19,7 @@ use std::f64::consts::PI;
 ///
 /// References:
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct Wgs {
     /// Earth's standard gravitational parameter \[km^3/s^2\]
     pub mu: f64,
@@ -78,17 +78,19 @@ pub struct StateVector {
 ///
 /// # Examples
 /// ```rust
-/// use Rusty_SGP4::common::CoordinateFrame;
+/// use crate::common::CoordinateFrame;
 ///
 /// let frame_teme = CoordinateFrame::TEME;
 /// let frame_j2000 = CoordinateFrame::J2000;
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoordinateFrame {
+    /// J2000, an Earth-centered inertial (ECI) coordinate frame
+    #[default]
+    J2000,
+
     /// True Equator Mean Equinox (TEME), an Earth-centered inertial (ECI) coordinate frame
     TEME,
-    /// J2000, an Earth-centered inertial (ECI) coordinate frame
-    J2000,
 }
 
 // ---------
@@ -221,7 +223,6 @@ pub fn calc_period(a: f64, mu: f64) -> f64 {
 
     return period;
 }
-
 // ----------
 // Unit Tests
 // ----------

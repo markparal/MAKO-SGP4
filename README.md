@@ -1,29 +1,25 @@
-# Rusty-SGP4
+# MAKO-SGP4
 **UNDER CONSTRUCTION**
 
-A Rust crate to parse and propagate Two-Line Element (TLE) sets using Simplified Perturbations Models (SGP4).
+A Rust crate to parse and propagate Two-Line Element (TLE) sets using Simplified Perturbations Models (SGP4 / SDP4).
 
 ## Motivations
 I am pursuing this project for two reasons
 1. To learn to write Rust code
 2. To dive into the theory surrounding SGP4
 
-## Plan
-- Implement TLE parsing and storage
-- Read "Revisiting Spacetrack Report #3: Rev 3"
-- Read "History of Analytical Orbit Modeling in the U. S. Space Surveillance System"
-- Implement SGP4 algorithm from Hoots et al
-- Implement changes from Vallado et al
-- Test with test cases from Vallado et al
+## Status
+- TLE parsing (optional name line + lines 1 and 2)
+- Near-Earth SGP4 and deep-space SDP4 (Hoots-style formulation, with Vallado Rev 3 corrections where needed)
+- Verification against Vallado Rev 3 cases in `test/vallado_cases.toml`
 
-## TODOs
-- Error handling (TLE)
-- Implement SGP4 equations
-- Compile into library (crate)
+Known open item: case 21 (`e < 1e-4` drag-term drop) is not implemented yet.
+
+## Plan / TODOs
+- OMM / GP dataset handling
 - Write a math spec
-- Include a visualizer?
-- Fit data to a TLE?
-- Conjunction screening?
+- Fit data to a TLE
+- Conjunction screening
 
 ## Testing and Documentation
 ```bash
@@ -33,6 +29,8 @@ cargo test
 # To build the Rust Docs
 cargo doc
 ```
+
+The integration tests in `test/vallado_cases.toml` use reference TLEs and ephemerides reproduced from Vallado et al., "Revisiting Spacetrack Report #3: Rev 3," AIAA 2006-6753, 2006. Reproduced for algorithm verification purposes.
 
 ## Resources
 - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
