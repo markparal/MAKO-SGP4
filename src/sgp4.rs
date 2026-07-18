@@ -988,7 +988,12 @@ pub fn init_atm_effects(wgs: &Wgs, gp: &GenPerturbElementSet, brouwer0: &Brouwer
     let c2 = c2_1 * (c2_2 + c2_3);
     
     let c1 = gp.bstar * c2;
-    let c3 = ((q0 - s).powf(4.) * zeta.powf(5.) * a30 * brouwer0.n * brouwer0.i.sin()) / (wgs.k2 * brouwer0.e);
+    // Vallado drop C3 when eccentricity is too small (avoids /e blow-up)
+    let c3 = if brouwer0.e > 1.0e-4 {
+        ((q0 - s).powf(4.) * zeta.powf(5.) * a30 * brouwer0.n * brouwer0.i.sin()) / (wgs.k2 * brouwer0.e)
+    } else {
+        0.0
+    };
     
     let c4_1 = 2. * brouwer0.n * (q0 - s).powi(4) * zeta.powi(4) * brouwer0.a * brouwer0.beta.powi(2) * psisq.powf(-3.5);
     let c4_2 = 2. * eta * (1. + brouwer0.e*eta) + 0.5 * brouwer0.e + 0.5 * eta.powi(3);
@@ -1686,10 +1691,10 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector{
     let omega_df = sgp4.brouwer0.omega + sgp4.zonal_params.omega_dot * delta_t;
     let raan_df = sgp4.brouwer0.raan + sgp4.zonal_params.raan_dot * delta_t;
 
-    // Neglect delta_omega and delta_m if deep space or perigee height is less than 220 km
+    // Neglect delta_omega and delta_m if deep space or perigee height is less than 220 km, or e ≤ 1e-4
     let delta_omega: f64;
     let delta_m: f64;
-    if sgp4.deep_space || sgp4.atm_params.hp < 220. {
+    if sgp4.deep_space || sgp4.atm_params.hp < 220. || sgp4.brouwer0.e <= 1.0e-4 {
         delta_omega = 0.;
         delta_m = 0.;
     } else {
