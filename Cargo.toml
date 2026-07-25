@@ -1,7 +1,11 @@
 [package]
-name = "MAKO-SGP4"
+name = "mako-sgp4"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+name = "mako_sgp4"
+path = "src/lib.rs"
 
 [dependencies]
 

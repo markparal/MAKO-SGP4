@@ -1,16 +1,16 @@
-// Module for propagating TLEs with SGP4
+//! Module for propagating GP element sets with SGP4
 
 // ------------------
 // External Libraries
 // ------------------
 use std::f64::consts::PI;
-use std::fs;
 
 // ------------------
 // Internal Libraries
 // ------------------
-use crate::time::{dayofyr2utc, utc2jday, DateTime, Timezone};
+use crate::time::{utc2jday, DateTime};
 use crate::common::{Wgs, WGS72, deg2rad, calc_period, StateVector, CoordinateFrame};
+use crate::gp::GenPerturbElementSet;
 
 // -------
 // Structs
@@ -18,9 +18,9 @@ use crate::common::{Wgs, WGS72, deg2rad, calc_period, StateVector, CoordinateFra
 
 /// Simplified General Perturbations 4 (SGP4) parameters
 ///
-/// This struct contains the epoch parameters which are necessary to propagate the state vectors of a satellite with SGP4
+/// This struct contains the epoch parameters which are necessary to propagate the state vectors of a satellite with SGP4.
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -38,7 +38,7 @@ pub struct Sgp4 {
     /// Fractional Julian date at epoch \[days\]
     pub jdfrac0: f64,
 
-    /// Deep space satellite 
+    /// Deep space satellite
     pub deep_space: bool,
 
     /// Brouwer mean elements at epoch
@@ -69,75 +69,12 @@ pub struct Sgp4 {
     pub half_day_resonance_params: HalfDayResonanceParams,
 }
 
-/// General Perturbation Element Set for an Earth-orbiting satellite.
-///
-/// This struct represents the parsed contents of a standard General Perturbation Element Set.
-/// The General Perturbation Element Set is the standard set of orbital elements used with the
-/// SGP4 propagator. Elements are commonly distributed as Two-Line Element (TLE) text; other
-/// formats (OMM, GP JSON/CSV) use the same fields but are not parsed by this crate yet.
-///
-/// References:
-/// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
-#[derive(Default, Clone)]
-pub struct GenPerturbElementSet {
-    /// Common name of the satellite (e.g., "ISS (ZARYA)")
-    pub common_name: String,
-
-    /// NORAD satellite catalog number
-    pub satellite_catalog_number: i32,
-
-    /// Classification (`U` = Unclassified, `C` = Classified, `S` = Secret)
-    pub classification: char,
-
-    /// International designator (launch year, launch number, piece)
-    pub international_designator: String,
-
-    /// Epoch UTC datetime
-    pub epoch_datetime: DateTime,
-
-    /// First time derivative of mean motion \[revs/day^2\]
-    pub first_derivative_of_mean_motion: f64,
-
-    /// Second time derivative of mean motion \[revs/day^3\]
-    pub second_derivative_of_mean_motion: f64,
-
-    /// B* drag term \[1/Earth radii\]
-    pub bstar: f64,
-
-    /// Ephemeris type (always zero)
-    pub ephemeris_type: i32,
-
-    /// Element set number
-    pub element_set_number: i32,
-
-    /// Orbital inclination \[degrees\]
-    pub inclination: f64,
-
-    /// Right ascension of the ascending node (RAAN) \[degrees\]
-    pub right_ascension_of_ascending_node: f64,
-
-    /// Orbital eccentricity \[\]
-    pub eccentricity: f64,
-
-    /// Argument of perigee \[degrees\]
-    pub argument_of_perigee: f64,
-
-    /// Mean anomaly \[degrees\]
-    pub mean_anomaly: f64,
-
-    /// Mean motion \[revs/day\]
-    pub mean_motion: f64,
-
-    /// Revolution number at epoch \[revs\]
-    pub revolution_number_at_epoch: i64,
-}
-
 /// Brouwer Mean Orbital Elements
 ///
 /// This struct contains the mean orbital elements of a TLE converted to Brouwer convention. TLEs report mean orbital elements
 /// in Kozai convention.
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -178,7 +115,7 @@ pub struct BrouwerMeanElements {
 ///
 /// This struct contains the parameters necessary to account for the impacts of atmospheric drag on an orbit.
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -225,7 +162,7 @@ pub struct AtmDragParams {
 ///
 /// This struct contains the parameters necessary to account for the impacts of Earth's zonal harmonics on an orbit.
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -245,7 +182,7 @@ pub struct EarthZonalParams {
 ///
 /// This struct contains the parameters necessary to account for the impacts of the Sun and Moon on an orbit.
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -296,7 +233,7 @@ pub struct ThirdBodyParams {
     /// x5 constant
     pub x5: f64,
 
-    /// x6 constant 
+    /// x6 constant
     pub x6: f64,
 
     /// x7 constant
@@ -361,7 +298,7 @@ pub struct ThirdBodyParams {
 ///
 /// This struct contains the parameters necessary to account for the impacts of half day resonance effects on an orbit.
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -372,7 +309,7 @@ pub struct HalfDayResonanceParams {
 
     /// lam0 constant
     pub lam0: f64,
-    
+
     /// lam0 rate of change
     pub lam0_dot: f64,
 
@@ -411,7 +348,7 @@ pub struct HalfDayResonanceParams {
 ///
 /// This struct contains the parameters necessary to account for the impacts of whole day resonance effects on an orbit.
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -453,366 +390,31 @@ pub struct WholeDayResonanceParams {
 // Constants
 // ---------
 
-/// A conversion from rev/day to rad/min
+/// Conversion factor from revolutions per day to radians per minute
 ///
-/// References
+/// Used to convert GP mean motion (`revs/day`) into the SGP4 internal
+/// mean-motion unit of `rad/min`.
+///
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 const XPDOTP: f64 = 1440.0 / (2.0 * PI);
 
-/// The rotational velocity of the earth in rad/min
+/// Earth's rotational rate \[rad/min\]
 ///
-/// References:
+/// Sidereal Earth rotation rate used when evaluating Greenwich sidereal time
+/// and half-/whole-day resonance terms during deep-space propagation.
+///
+/// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
-const RPTIM: f64 =  4.37526908801129966e-3;
+const RPTIM: f64 = 4.37526908801129966e-3;
 
 // ---------
 // Functions
 // ---------
 
-/// Builds a [`Sgp4`] struct from the lines of a Two-Line Element (TLE) set.
-///
-/// Given the two required TLE lines (line 1 and line 2), and an optional
-/// name line (line 0), this function parses the input into a [`Sgp4`] struct.
-///
-/// # Arguments
-/// * `line1` - The first TLE data line (TLE line 1)
-/// * `line2` - The second TLE data line (TLE line 2)
-/// * `line0` - Optional name line (TLE line 0)
-///
-/// # Returns
-/// * [`Sgp4`] - Struct containing the parsed SGP4 parameters.
-///
-/// # Examples
-/// ```rust
-/// // Define the TLE lines
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// 
-/// // Parse the TLE lines into a SGP4 struct
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-/// 
-/// // Assert the TLE struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
-/// ```
-///
-/// # References
-/// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
-pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Sgp4 {
-    // Create mutable General Perturbation Element Set struct
-    let mut gp = GenPerturbElementSet::default();
-
-    // Validate the TLE checksum
-    if !tle_checksum(line1) || !tle_checksum(line2) {
-        eprintln!("warning: TLE checksum failed; continuing with parse");
-    }
-
-    // Extract the common name of the satellite from line 0
-    if let Some(name_line) = line0 {
-        if name_line.len() < 1 || name_line.len() > 24 {
-            panic!("TLE line 0 is invalid: name must be 1-24 characters, got {}", name_line.len());
-        }
-        gp.common_name = name_line.to_string();
-    }
-    
-    // Parse through line 1 and populate TLE struct
-    if line1.len() < 69 || line1.len() > 69 {
-        panic!("TLE line 1 is invalid: must be 69 characters, got {}", line1.len());
-    } else {
-        // Line 1
-        // Satellite catalog number
-        gp.satellite_catalog_number = line1[2..7].trim().parse::<i32>().unwrap();
-
-        // Classification
-        gp.classification = line1[7..8].trim().parse::<char>().unwrap();
-
-        // International designator
-        if line1[9..17].trim().is_empty() {
-            // Handle case where international designator is not present
-            gp.international_designator = "".to_string();
-        } else {
-            gp.international_designator = line1[9..17].trim().to_string();
-        }
-
-        // Epoch year (last two numbers)
-        let yr_two_digit = line1[18..20].trim().parse::<i32>().unwrap();
-        let epoch_year: i32;
-        if yr_two_digit < 57 {
-            epoch_year = 2000 + yr_two_digit
-        } else {
-            epoch_year = 1900 + yr_two_digit
-        }
-
-        // Epoch day of year
-        let epoch_day = line1[20..32].trim().parse::<f64>().unwrap();
-
-        // Epoch UTC datetime
-        let Some(epoch_datetime) = dayofyr2utc(epoch_year, epoch_day).ok() else {
-            panic!("Error converting epoch day of year to UTC datetime: Epoch year: {}, Epoch day: {}", epoch_year, epoch_day);
-        };
-        gp.epoch_datetime = epoch_datetime;
-
-        // 1st derivative of mean motion [revs/day^2]
-        gp.first_derivative_of_mean_motion = line1[33..43].trim().parse::<f64>().unwrap() * 2.0;
-
-        // 2nd derivative of mean motion [revs/days^3]
-        // Account for - in 2nd derivative of mean motion
-        if line1[44..45].parse::<char>().unwrap() == '-' {
-            gp.second_derivative_of_mean_motion = format!("-0.{}", line1[45..50].trim()).parse::<f64>().unwrap() * 10.0_f64.powi(line1[50..52].parse::<i32>().unwrap()) * 6.0_f64;
-        } else {
-            gp.second_derivative_of_mean_motion = format!("0.{}", line1[45..50].trim()).parse::<f64>().unwrap() * 10.0_f64.powi(line1[50..52].parse::<i32>().unwrap()) * 6.0_f64;
-        }
-
-        // B* [1/Earth Radii]
-        // Account for - in B* term
-        if line1[53..54].parse::<char>().unwrap() == '-' {
-            gp.bstar = format!("-0.{}", line1[54..59].trim()).parse::<f64>().unwrap() * 10.0_f64.powi(line1[59..61].parse::<i32>().unwrap());
-        } else {
-            gp.bstar = format!("0.{}", line1[54..59].trim()).parse::<f64>().unwrap() * 10.0_f64.powi(line1[59..61].parse::<i32>().unwrap());
-        }
-
-        // Ephemeris type
-        if line1[62..63].trim().is_empty() {
-            // Handle case where ephemeris type is not present
-            gp.ephemeris_type = 0;
-        } else {
-            gp.ephemeris_type = line1[62..63].parse::<i32>().unwrap();
-        }
-
-        // Element set number
-        gp.element_set_number = line1[64..68].trim().parse::<i32>().unwrap();
-    }
-
-    // Parse through line 2 and populate TLE struct
-    if line2.len() < 69 || line2.len() > 69 {
-        panic!("TLE line 2 is invalid: must be 69 characters, got {}", line2.len());
-    } else {
-        // Line 2
-        // Inclination [degs]
-        gp.inclination = line2[8..16].trim().parse::<f64>().unwrap();
-
-        // Right ascension of ascending node [degs]
-        gp.right_ascension_of_ascending_node = line2[17..25].trim().parse::<f64>().unwrap();
-
-        // Eccentricity
-        gp.eccentricity = format!("0.{}", line2[26..33].trim()).parse::<f64>().unwrap();
-
-        // Argument of perigee [degs]
-        gp.argument_of_perigee = line2[34..42].trim().parse::<f64>().unwrap();
-
-        // Mean anomaly [degs]
-        gp.mean_anomaly = line2[43..51].trim().parse::<f64>().unwrap();
-
-        // Mean motion [revs/day]
-        gp.mean_motion = line2[52..63].trim().parse::<f64>().unwrap();
-
-        // Revolution number at epoch
-        gp.revolution_number_at_epoch = line2[63..68].trim().parse::<i64>().unwrap();
-    }
-
-    // Initialize the SGP4 parameters
-    let sgp4 = init_sgp4(&gp, None);
-
-    return sgp4;
-}
-
-/// Builds a vector of [`Sgp4`] structs from a string containing Two-Line Element (TLE) sets.
-///
-/// This function parses a string containing one or more TLEs in either
-/// 2-line or 3-line (name + 2 lines) format and returns all successfully
-/// parsed entries.
-///
-/// # Arguments
-/// * `tle_string` - A string containing one or more Two-Line Element (TLE) sets
-///
-/// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 parameters
-///
-/// # Examples
-/// ```rust
-/// // Define the TLE string
-/// let tle_string = "ISS (ZARYA)\n1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921\n2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// 
-/// // Parse the TLE string into a SGP4 struct
-/// let sgp4s = from_tle_string(tle_string);
-/// let sgp4 = &sgp4s[0];
-/// 
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
-/// ```
-///
-/// # References
-/// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
-pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
-    // Parse the string into lines, removing spaces
-    let lines: Vec<&str> = tle_string
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .collect();
-
-    // Create the tles vector
-    let mut sgp4s = Vec::new();
-    let mut i = 0;
-
-    // Iterate through the lines building TLE structs when possible
-    while i < lines.len() {
-        // Find TLEs within the string, either 2 or 3 line entries
-        if lines[i].starts_with('1') {
-            // This is likely a 2 line entry, check length
-            if i + 1 >= lines.len() {
-                break;
-            }
-            // Check that next line starts with '2'
-            if lines[i + 1].starts_with('2') {
-                let sgp4 = from_tle_lines(lines[i], lines[i + 1], None);
-                sgp4s.push(sgp4);
-                i += 2;
-            } else {
-                i += 1;
-            }
-        } else {
-            // This is likely a 3 line entry, check length
-            if i + 2 >= lines.len() {
-                break;
-            }
-            // Check that next line 2 lines starts with '1' and '2'
-            if lines[i + 1].starts_with('1') && lines[i + 2].starts_with('2') {
-                let sgp4 = from_tle_lines(lines[i + 1], lines[i + 2], Some(lines[i]));
-                sgp4s.push(sgp4);
-                i += 3;
-            } else {
-                i += 1;
-            }
-        }
-    }
-    // Return vector of SGP4 structs
-    return sgp4s;
-}
-
-/// Builds a vector of [`Sgp4`] structs from a file containing Two-Line Element (TLE) sets.
-///
-/// This function parses a file containing one or more TLEs in either
-/// 2-line or 3-line (name + 2 lines) format and returns all successfully
-/// parsed entries.
-///
-/// # Arguments
-/// * `file_path` - A path to a file containing one or more Two-Line Element (TLE) sets
-///
-/// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 structs.
-///
-/// # Examples
-/// ```rust
-/// // Define the TLE file path
-/// let tle_file_path = "test/tle_file.txt";
-/// 
-/// // Parse the TLE file into a vector of SGP4 structs
-/// let sgp4s = from_tle_file(tle_file_path);
-/// let sgp4 = &sgp4s[12];
-/// 
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
-/// ```
-///
-/// # References
-/// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
-pub fn from_tle_file(file_path: &str) -> Vec<Sgp4> {
-    // Open the TLE file
-    let tle_string = fs::read_to_string(file_path)
-        .expect("Cannot read TLE file");
-    
-    // Parse tle string into a vector of SGP4 structs
-    let sgp4s = from_tle_string(&tle_string);
-
-    // Return the vector of SGP4 structs
-    return sgp4s;
-}
-
-/// Calculate the checksum of the Two-Line Element (TLE) line.
-///
-/// Given a TLE line, calculate the checksum of that line. Follow the following rules: 
-/// - Ignore alpha characters
-/// - Sum digits 0-9 as integer values
-/// - '-' is treated as 1
-/// - Return checksum % 10
-///
-/// # Arguments
-/// * `line` - The TLE line to calculate the checksum of
-///
-/// # Panics
-/// * If the TLE line is invalid (must be 69 characters)
-///
-/// # Returns
-/// * `checksum` - The checksum of the TLE line (integer 0-9)
-///
-/// # Examples
-/// ```rust
-/// // Define the TLE line
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// 
-/// // Calculate the checksum of the TLE line
-/// let checksum = calc_checksum(tle_line1);
-/// 
-/// // Assert the checksum is correct
-/// assert_eq!(checksum, 1);
-/// ```
-pub fn calc_checksum(line: &str) -> i32 {
-    // Initialize checksum to 0
-    let mut checksum = 0;
-
-    // Loop through the line and calculate the checksum
-    for c in line.chars().take(68) {
-        match c {
-            '0'..='9' => checksum += (c as u8 - b'0') as i32,
-            '-' => checksum += 1,
-            _ => {}
-        }
-    }
-
-    // Calculate the checksum
-    checksum = checksum % 10;
-
-    // Return the checksum
-    return checksum;
-}
-
-/// Check if the TLE line has been corrupted by running a checksum test.
-///
-/// Given a TLE line, check if the checksum of that line is valid.
-///
-/// # Arguments
-/// * `line` - The TLE line to check the checksum of
-///
-/// # Returns
-/// * `bool` - True if the checksum of the line is valid, false if otherwise
-///
-/// # Examples
-/// ```rust
-/// // Define the TLE line
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// 
-/// // Calculate the checksum of the TLE line
-/// let checksum = tle_checksum(tle_line1);
-/// 
-/// // Assert the checksum is correct
-/// assert_eq!(checksum, true);
-/// ```
-pub fn tle_checksum(line: &str) -> bool {
-    // Calculate the checksum of the line
-    let checksum = calc_checksum(line);
-
-    // Compare the checksum to the last character of the line
-    if checksum == line[68..69].parse::<i32>().unwrap() {
-        return true;
-    } else {
-        return false;
-    }
-}
-
 /// Build an [`Sgp4`] struct for state propagation from a [`GenPerturbElementSet`] struct
 ///
-/// Given a [`GenPerturbElementSet`] struct, calculate the time-independent parameters necessary 
+/// Given a [`GenPerturbElementSet`] struct, calculate the time-independent parameters necessary
 /// to propagate a satellite's states in time. These parameters include
 /// - Brouwer mean orbital elements
 /// - Atmospheric drag parameters
@@ -828,17 +430,18 @@ pub fn tle_checksum(line: &str) -> bool {
 /// * [`Sgp4`] - The time-independent parameters for the SGP4 propagator
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// // Define General Perturbation (GP) Element Set
 /// let gp = GenPerturbElementSet::default();
-/// 
+///
 /// // Define WGS model
 /// let wgs = WGS72;
 ///
 /// // Initialize the SGP4 propagator
 /// let sgp4 = init_sgp4(&gp, Some(&wgs));
 /// ```
-/// References
+///
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -938,6 +541,9 @@ pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Sgp4 {
 
 /// Initialize the atmospheric drag effects
 ///
+/// Computes the power-law density constants (`q0`, `s`, `zeta`, `eta`) and the
+/// drag coefficients (`C1`–`C5`, `D2`–`D4`) used during SGP4 secular updates.
+///
 /// # Arguments
 /// * `wgs` - The WGS model
 /// * `gp` - The General Perturbation (GP) Element Set
@@ -947,7 +553,7 @@ pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Sgp4 {
 /// * `AtmDragParams` - The atmospheric drag parameters
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// // Define WGS model
 /// let wgs = WGS72;
 ///
@@ -955,7 +561,7 @@ pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Sgp4 {
 /// let atm_params = init_atm_effects(&wgs, &gp, &brouwer0);
 /// ```
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -967,8 +573,8 @@ pub fn init_atm_effects(wgs: &Wgs, gp: &GenPerturbElementSet, brouwer0: &Brouwer
     // Determine parameter s based on perigee height
     let rp = brouwer0.a * (1. - brouwer0.e); // Radius of perigee [Earth Radii]
     let hp = (rp - 1.) * wgs.r_earth_eq; // Perigee height [km]
-    
-    let mut s: f64; // [Earth radii]
+
+    let s: f64; // [Earth radii]
     if hp >= 156. {
         s = (78. + wgs.r_earth_eq) / wgs.r_earth_eq;
     } else if hp >= 98.{
@@ -981,12 +587,12 @@ pub fn init_atm_effects(wgs: &Wgs, gp: &GenPerturbElementSet, brouwer0: &Brouwer
     let zeta = 1. / (brouwer0.a - s);
     let eta = brouwer0.a * brouwer0.e * zeta;
     let psisq = (1. - eta.powi(2)).abs(); // abs is used to handle the case when eta > 1 (sub-orbital / decayed orbits)
-    
+
     let c2_1 = (q0 - s).powi(4) * zeta.powi(4) * brouwer0.n * psisq.powf(-3.5);
     let c2_2 = brouwer0.a * (1. + (3./2.) * eta.powi(2) + 4. * brouwer0.e * eta + brouwer0.e * eta.powi(3));
     let c2_3 = (3./2.) * (wgs.k2 * zeta / psisq) * (-(1./2.) + (3./2.) * brouwer0.theta.powi(2)) * (8. + 24. * eta.powi(2) + 3. * eta.powi(4));
     let c2 = c2_1 * (c2_2 + c2_3);
-    
+
     let c1 = gp.bstar * c2;
     // Vallado drop C3 when eccentricity is too small (avoids /e blow-up)
     let c3 = if brouwer0.e > 1.0e-4 {
@@ -994,18 +600,18 @@ pub fn init_atm_effects(wgs: &Wgs, gp: &GenPerturbElementSet, brouwer0: &Brouwer
     } else {
         0.0
     };
-    
+
     let c4_1 = 2. * brouwer0.n * (q0 - s).powi(4) * zeta.powi(4) * brouwer0.a * brouwer0.beta.powi(2) * psisq.powf(-3.5);
     let c4_2 = 2. * eta * (1. + brouwer0.e*eta) + 0.5 * brouwer0.e + 0.5 * eta.powi(3);
     let c4_3 = 2. * wgs.k2 * zeta / (brouwer0.a * psisq);
     let c4_4 = 3. * (1. - 3. * brouwer0.theta.powi(2)) * (1. + 3./2. * eta.powi(2) - 2. * brouwer0.e * eta - 0.5 * brouwer0.e * eta.powi(3));
     let c4_5 = 3./4. * (1. - brouwer0.theta.powi(2)) * (2. * eta.powi(2) - brouwer0.e * eta - brouwer0.e * eta.powi(3)) * (2. * brouwer0.omega).cos();
     let c4 = c4_1 * (c4_2 - c4_3 * (c4_4 + c4_5));
-    
+
     let c5_1 = 2. * (q0 - s).powi(4) * zeta.powi(4) * brouwer0.a * brouwer0.beta.powi(2) * psisq.powf(-3.5);
     let c5_2 = 1. + 11./4. * eta * (eta + brouwer0.e) + brouwer0.e * eta.powi(3);
     let c5 = c5_1 * c5_2;
-    
+
     let d2 = 4. * brouwer0.a * zeta * c1.powi(2);
     let d3 = 4./3. * brouwer0.a * zeta.powi(2) * (17. * brouwer0.a + s) * c1.powi(3);
     let d4 = 2./3. * brouwer0.a.powi(2) * zeta.powi(3) * (221. * brouwer0.a + 31. * s) * c1.powi(4);
@@ -1031,6 +637,9 @@ pub fn init_atm_effects(wgs: &Wgs, gp: &GenPerturbElementSet, brouwer0: &Brouwer
 
 /// Initialize the Earth zonal harmonics effects
 ///
+/// Computes the secular rates of mean anomaly, argument of perigee, and RAAN
+/// due to Earth's J2 / J4 zonal harmonics at the GP epoch.
+///
 /// # Arguments
 /// * `wgs` - The WGS model
 /// * `brouwer0` - The Brouwer mean elements at epoch
@@ -1039,7 +648,7 @@ pub fn init_atm_effects(wgs: &Wgs, gp: &GenPerturbElementSet, brouwer0: &Brouwer
 /// * `EarthZonalParams` - The Earth zonal harmonics parameters
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// // Define Brouwer mean elements at epoch
 /// let brouwer0 = BrouwerMeanElements::default();
 ///
@@ -1047,7 +656,7 @@ pub fn init_atm_effects(wgs: &Wgs, gp: &GenPerturbElementSet, brouwer0: &Brouwer
 /// let zonal_params = init_zonal_effects(&WGS72, &brouwer0);
 /// ```
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -1079,6 +688,10 @@ pub fn init_zonal_effects(wgs: &Wgs, brouwer0: &BrouwerMeanElements) -> EarthZon
 
 /// Initialize the Lunar and Solar third body effects
 ///
+/// For deep-space satellites (period ≥ 225 min), evaluates Sun/Moon geometry at
+/// the TLE epoch and returns secular third-body rates. Near-Earth satellites
+/// receive default (zero) parameters.
+///
 /// # Arguments
 /// * `deep_space` - Is this a deep space satellite
 /// * `jd0` - The Julian date at epoch \[days\]
@@ -1089,7 +702,7 @@ pub fn init_zonal_effects(wgs: &Wgs, brouwer0: &BrouwerMeanElements) -> EarthZon
 /// * `(ThirdBodyParams, ThirdBodyParams)` - The Lunar and Solar third body parameters
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// // Define Brouwer mean elements at epoch
 /// let brouwer0 = BrouwerMeanElements::default();
 ///
@@ -1097,7 +710,7 @@ pub fn init_zonal_effects(wgs: &Wgs, brouwer0: &BrouwerMeanElements) -> EarthZon
 /// let (lunar_params, solar_params) = init_lunar_solar_effects(true, jd0, jdfrac0, &brouwer0);
 /// ```
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -1109,7 +722,7 @@ pub fn init_lunar_solar_effects(deep_space: bool, jd0: f64, jdfrac0: f64, brouwe
 
     // Lunar/Solar element epochs (12/31/1899 12:00:00 UTC) \[Julian date\]
     let epoch_sm = 2415020.0;
-    
+
     // Lunar constants
     // Lunar eccentricity
     let e_m = 0.05490;
@@ -1211,6 +824,9 @@ pub fn init_lunar_solar_effects(deep_space: bool, jd0: f64, jdfrac0: f64, brouwe
 
 /// Calculate the secular rates of a third body's orbital elements
 ///
+/// Builds the frozen geometric coefficients (`x*`, `z*`) and secular element
+/// rates for one third body (Sun or Moon) relative to the satellite orbit.
+///
 /// # Arguments
 /// * `cos_i_x` - Cosine of the third-body inclination \[\]
 /// * `sin_i_x` - Sine of the third-body inclination \[\]
@@ -1227,14 +843,14 @@ pub fn init_lunar_solar_effects(deep_space: bool, jd0: f64, jdfrac0: f64, brouwe
 /// * `ThirdBodyParams` - Secular rates and frozen geometric coefficients (`x*`, `z*`)
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// let brouwer0 = BrouwerMeanElements::default();
 /// let lunar_params = calc_lunar_solar_secular_rates(
 ///     cos_i_m, sin_i_m, e_m, n_m, cos_omega_m, sin_omega_m, raan_m, m_m, c_m, &brouwer0,
 /// );
 /// ```
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
@@ -1268,7 +884,7 @@ pub fn calc_lunar_solar_secular_rates(cos_i_x: f64, sin_i_x: f64, e_x: f64, n_x:
     let x6 = a6 * sin_omega0;
     let x7 = a5 * cos_omega0;
     let x8 = a6 * cos_omega0;
-    
+
     let z31 = 12. * x1.powi(2) - 3. * x3.powi(2);
     let z32 = 24. * x1 * x2 - 6. * x3 * x4;
     let z33 = 12. * x2.powi(2) - 3. * x4.powi(2);
@@ -1284,11 +900,11 @@ pub fn calc_lunar_solar_secular_rates(cos_i_x: f64, sin_i_x: f64, e_x: f64, n_x:
 
     // Calculate secular rates
     let e_x_dot = -15. * c_x * n_x * (brouwer0.e * brouwer0.beta / brouwer0.n) * (x1 * x3 + x2 * x4);
-    
+
     let i_x_dot = (-c_x * n_x / (2. * brouwer0.n * brouwer0.beta)) * (z11 + z13);
-    
+
     let m_x_dot = (-c_x * n_x / brouwer0.n) * (z1 + z3 - 14. - 6. * brouwer0.e.powi(2));
-    
+
     let mut raan_x_dot = 0.;
     if brouwer0.i >= deg2rad(3.) {
         raan_x_dot = c_x * n_x / (2. * brouwer0.n * brouwer0.beta * sin_i0) * (z21 + z23);
@@ -1344,6 +960,9 @@ pub fn calc_lunar_solar_secular_rates(cos_i_x: f64, sin_i_x: f64, e_x: f64, n_x:
 
 /// Initialize the half day resonance effects of Earth's gravity
 ///
+/// Initializes 12-hour resonance coefficients (`d2201` … `d5433`) and the
+/// auxiliary longitude `lambda0` used by the Euler–Maclaurin deep-space integrator.
+///
 /// # Arguments
 /// * `jd0` - The Julian date at epoch \[days\]
 /// * `jdfrac0` - The fractional Julian date at epoch \[days\]
@@ -1356,7 +975,7 @@ pub fn calc_lunar_solar_secular_rates(cos_i_x: f64, sin_i_x: f64, e_x: f64, n_x:
 /// * `HalfDayResonanceParams` - The half day resonance parameters
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// // Define Brouwer mean elements at epoch
 /// let brouwer0 = BrouwerMeanElements::default();
 ///
@@ -1379,16 +998,16 @@ pub fn calc_lunar_solar_secular_rates(cos_i_x: f64, sin_i_x: f64, e_x: f64, n_x:
 /// let half_day_resonance_params = init_earth_gravity_resonance_halfday(jd0, jdfrac0, &brouwer0, &zonal_params, &lunar_params, &solar_params);
 /// ```
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 pub fn init_earth_gravity_resonance_halfday(
-    jd0: f64, 
-    jdfrac0: f64, 
-    brouwer0: &BrouwerMeanElements, 
-    zonal_params: &EarthZonalParams, 
-    lunar_params: &ThirdBodyParams, 
+    jd0: f64,
+    jdfrac0: f64,
+    brouwer0: &BrouwerMeanElements,
+    zonal_params: &EarthZonalParams,
+    lunar_params: &ThirdBodyParams,
     solar_params: &ThirdBodyParams
 ) -> HalfDayResonanceParams {
     // Precompute common quantities
@@ -1493,6 +1112,10 @@ pub fn init_earth_gravity_resonance_halfday(
 
 /// Initialize the whole day resonance effects of Earth's gravity
 ///
+/// Initializes 24-hour resonance coefficients (`delta1`–`delta3`, `lambda31`/`lambda22`/`lambda33`)
+/// and the auxiliary longitude `lambda0` used by the Euler–Maclaurin deep-space
+/// integrator.
+///
 /// # Arguments
 /// * `jd0` - The Julian date at epoch \[days\]
 /// * `jdfrac0` - The fractional Julian date at epoch \[days\]
@@ -1505,7 +1128,7 @@ pub fn init_earth_gravity_resonance_halfday(
 /// * `WholeDayResonanceParams` - The whole day resonance parameters
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// // Define Brouwer mean elements at epoch
 /// let brouwer0 = BrouwerMeanElements::default();
 ///
@@ -1528,16 +1151,16 @@ pub fn init_earth_gravity_resonance_halfday(
 /// let whole_day_resonance_params = init_earth_gravity_resonance_wholeday(jd0, jdfrac0, &brouwer0, &zonal_params, &lunar_params, &solar_params);
 /// ```
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 pub fn init_earth_gravity_resonance_wholeday(
-    jd0: f64, 
-    jdfrac0: f64, 
-    brouwer0: &BrouwerMeanElements, 
-    zonal_params: &EarthZonalParams, 
-    lunar_params: &ThirdBodyParams, 
+    jd0: f64,
+    jdfrac0: f64,
+    brouwer0: &BrouwerMeanElements,
+    zonal_params: &EarthZonalParams,
+    lunar_params: &ThirdBodyParams,
     solar_params: &ThirdBodyParams
 ) -> WholeDayResonanceParams {
     // Precompute common quantities
@@ -1556,7 +1179,7 @@ pub fn init_earth_gravity_resonance_wholeday(
     let f220 = (3./4.) * (1. + cos_i0).powi(2);
     let f311 = (15./16.) * sin_i0.powi(2) * (1. + 3. * cos_i0) - (3./4.) * (1. + cos_i0);
     let f330 = (15. / 8.) * (1. + cos_i0).powi(3);
-    
+
     // Calculate functions of eccentricity
     let g200 = 1. - (5./2.) * brouwer0.e.powi(2) + (13. / 16.) * brouwer0.e.powi(4);
     let g310 = 1. + 2. * brouwer0.e.powi(2);
@@ -1578,7 +1201,7 @@ pub fn init_earth_gravity_resonance_wholeday(
     let whole_day_resonance_params = WholeDayResonanceParams {
         theta_g: theta_g,
         lam0: lam0,
-        lam0_dot:lam0_dot,
+        lam0_dot: lam0_dot,
         lam31: lam31,
         lam22: lam22,
         lam33: lam33,
@@ -1602,11 +1225,11 @@ pub fn init_earth_gravity_resonance_wholeday(
 /// * `theta_g` - GMST \[rad\], wrapped to \[0, 2π)
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// let theta_g = calc_theta_g(jd0, jdfrac0);
 /// ```
 ///
-/// References
+/// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 pub fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
     // Calculate the Julian centuries since J2000.0
@@ -1634,16 +1257,19 @@ pub fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// # Returns
 /// * `StateVector` - TEME position \[km\] and velocity \[km/s\]
 ///
+/// # Panics
+/// * If `datetime` is not UTC or Julian-day conversion fails
+///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// let state_vector = sgp4_prop_datetime(&sgp4, &datetime);
 /// ```
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector{
+pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector {
     // Convert datetime to Julian day format
     let (jd_prop, jdfrac_prop) = utc2jday(&datetime).unwrap();
 
@@ -1668,16 +1294,19 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector{
 /// # Returns
 /// * `StateVector` - TEME position \[km\] and velocity \[km/s\]
 ///
+/// # Panics
+/// * If intermediate orbital elements become non-physical during propagation
+///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// let state_vector = sgp4_prop_delta(&sgp4, 360.0); // +6 hours
 /// ```
 ///
-/// References
+/// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector{
+pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
     // Create mutable variables for the orbital elements
     let mut m: f64;
     let mut omega: f64;
@@ -1866,10 +1495,10 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector{
             let alpha = i.sin() * raan.sin() + raan.cos() * delta_raan_ls + i.cos() * raan.sin() * delta_i_ls;
             let beta = i.sin() * raan.cos() - raan.sin() * delta_raan_ls + i.cos() * raan.cos() * delta_i_ls;
             let raan_old = raan;
-            
+
             // Use Vallado's modification which is more numerically stable when i ~ 0
             let m_omega_raan = m + omega + delta_m_ls + delta_omega_ls + (i.cos() - delta_i_ls * i.sin()) * raan;
-            
+
             // Calculate RAAN
             raan = alpha.atan2(beta);
             // Maintain RAAN continuity across atan2 branch cuts
@@ -1880,7 +1509,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector{
                     raan -= 2.0 * PI;
                 }
             }
-            
+
             // Calculate omega
             m += delta_m_ls;
             omega = m_omega_raan - m - i.cos() * raan;
@@ -1931,7 +1560,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector{
         }
 
         e_omega += delta_e_omega;
-        
+
         // Verify convergence
         if delta_e_omega.abs() < 1e-12 {
             break;
@@ -2007,6 +1636,9 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector{
 
 /// Half day Euler-Maclaurin integration step
 ///
+/// Evaluates `lambda_dot`, `n_dot`, `lambda_ddot`, and `n_ddot` for one 12-hour resonance integrator step
+/// at the current auxiliary longitude, mean motion, and argument of perigee.
+///
 /// # Arguments
 /// * `lami` - The auxilary variable at time i
 /// * `ni` - The mean motion at time i
@@ -2020,7 +1652,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector{
 /// * `ni_ddot` - The 2nd derivative of the mean motion at time i+1
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// // Define auxilary variable at time i
 /// let lami = 0.0;
 ///
@@ -2034,7 +1666,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector{
 /// let (lami_dot, ni_dot, lami_ddot, ni_ddot) = half_day_euler_maclaurin_step(lami, ni, omegai, &half_day_resonance_params);
 /// ```
 ///
-/// References
+/// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 pub fn half_day_euler_maclaurin_step(lami: f64, ni: f64, omegai: f64, half_day_resonance_params: &HalfDayResonanceParams) -> (f64, f64, f64, f64) {
@@ -2082,6 +1714,9 @@ pub fn half_day_euler_maclaurin_step(lami: f64, ni: f64, omegai: f64, half_day_r
 
 /// Whole day Euler-Maclaurin integration step
 ///
+/// Evaluates `lambda_dot`, `n_dot`, `lambda_ddot`, and `n_ddot` for one 24-hour resonance integrator step
+/// at the current auxiliary longitude and mean motion.
+///
 /// # Arguments
 /// * `lami` - The auxilary variable at time i
 /// * `ni` - The mean motion at time i
@@ -2094,7 +1729,7 @@ pub fn half_day_euler_maclaurin_step(lami: f64, ni: f64, omegai: f64, half_day_r
 /// * `ni_ddot` - The 2nd derivative of the mean motion at time i+1
 ///
 /// # Examples
-/// ```rust
+/// ```rust,ignore
 /// // Define auxilary variable at time i
 /// let lami = 0.0;
 ///
@@ -2108,14 +1743,14 @@ pub fn half_day_euler_maclaurin_step(lami: f64, ni: f64, omegai: f64, half_day_r
 /// let (lami_dot, ni_dot, lami_ddot, ni_ddot) = whole_day_euler_maclaurin_step(lami, ni, &whole_day_resonance_params);
 /// ```
 ///
-/// References
+/// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 pub fn whole_day_euler_maclaurin_step(lami: f64, ni: f64, whole_day_resonance_params: &WholeDayResonanceParams) -> (f64, f64, f64, f64) {
     // Calculate the rate of change of the auxilary variable
     let lami_dot = ni + whole_day_resonance_params.lam0_dot;
 
-    // Calculate the rate of change of the mean motion 
+    // Calculate the rate of change of the mean motion
     let ni_dot_1 = whole_day_resonance_params.delta1 * (lami - whole_day_resonance_params.lam31).sin();
     let ni_dot_2 = whole_day_resonance_params.delta2 * (2. * (lami - whole_day_resonance_params.lam22)).sin();
     let ni_dot_3 = whole_day_resonance_params.delta3 * (3. * (lami - whole_day_resonance_params.lam33)).sin();
@@ -2139,6 +1774,8 @@ pub fn whole_day_euler_maclaurin_step(lami: f64, ni: f64, whole_day_resonance_pa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gp::from_tle_string;
+    use toml::from_str;
     use std::collections::HashMap;
     use serde::Deserialize;
 
@@ -2224,167 +1861,10 @@ mod tests {
     }
 
     #[test]
-    fn test_checksum_calculation() {
-        // Define the TLE line
-        let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-
-        // Calculate the checksum of the TLE line
-        let checksum = calc_checksum(tle_line1);
-
-        // Assert the checksum is correct
-        assert_eq!(checksum, 1);
-    }
-
-    #[test]
-    fn test_checksum_comparison() {
-        // Define the TLE line
-        let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-        let tle_line2 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2922";
-
-        // Calculate the checksum of the TLE line
-        let checksum = tle_checksum(tle_line1);
-        let checksum2 = tle_checksum(tle_line2);
-
-        // Assert the checksum is correct
-        assert_eq!(checksum, true);
-        assert_eq!(checksum2, false);
-    }
-
-    #[test]
-    fn test_tle_parsing_from_lines() {
-        // Define the TLE lines
-        let tle_line0 = "ISS (ZARYA)";
-        let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-        let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-
-        // Parse the TLE lines into a TLE struct
-        let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-
-        // Assert the TLE struct is correct
-        assert_eq!(sgp4.gp.common_name, "ISS (ZARYA)");
-        assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
-        assert_eq!(sgp4.gp.classification, 'U');
-        assert_eq!(sgp4.gp.international_designator, "98067A");
-        assert_eq!(sgp4.gp.epoch_datetime.year, 2008);
-        assert_eq!(sgp4.gp.epoch_datetime.month, 9);
-        assert_eq!(sgp4.gp.epoch_datetime.day, 20);
-        assert_eq!(sgp4.gp.epoch_datetime.hour, 12);
-        assert_eq!(sgp4.gp.epoch_datetime.minute, 25);
-        assert!((sgp4.gp.epoch_datetime.second - 40.104192).abs() < 1e-9);
-        assert_eq!(sgp4.gp.first_derivative_of_mean_motion, -0.00004364);
-        assert!((sgp4.gp.second_derivative_of_mean_motion + 6.0e-5).abs() < 1e-12);
-        assert_eq!(sgp4.gp.bstar, -0.000011606);
-        assert_eq!(sgp4.gp.ephemeris_type, 0);
-        assert_eq!(sgp4.gp.element_set_number, 292);
-        assert_eq!(sgp4.gp.inclination, 51.6416);
-        assert_eq!(sgp4.gp.right_ascension_of_ascending_node, 247.4627);
-        assert_eq!(sgp4.gp.eccentricity, 0.0006703);
-        assert_eq!(sgp4.gp.argument_of_perigee, 130.536);
-        assert_eq!(sgp4.gp.mean_anomaly, 325.0288);
-        assert_eq!(sgp4.gp.mean_motion, 15.72125391);
-        assert_eq!(sgp4.gp.revolution_number_at_epoch, 56353);
-    }
-
-    #[test]
-    fn test_tle_parsing_from_string() {
-        // Define the TLE string
-        let tle_string = "ISS (ZARYA)\n1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921\n2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-
-        // Parse the TLE string into a SGP4 struct
-        let sgp4s = from_tle_string(tle_string);
-        let sgp4 = &sgp4s[0];
-
-        // Assert the TLE struct is correct
-        assert_eq!(sgp4.gp.common_name, "ISS (ZARYA)");
-        assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
-        assert_eq!(sgp4.gp.classification, 'U');
-        assert_eq!(sgp4.gp.international_designator, "98067A");
-        assert_eq!(sgp4.gp.epoch_datetime.year, 2008);
-        assert_eq!(sgp4.gp.epoch_datetime.month, 9);
-        assert_eq!(sgp4.gp.epoch_datetime.day, 20);
-        assert_eq!(sgp4.gp.epoch_datetime.hour, 12);
-        assert_eq!(sgp4.gp.epoch_datetime.minute, 25);
-        assert!((sgp4.gp.epoch_datetime.second - 40.104192).abs() < 1e-9);
-        assert_eq!(sgp4.gp.first_derivative_of_mean_motion, -0.00004364);
-        assert!((sgp4.gp.second_derivative_of_mean_motion + 6.0e-5).abs() < 1e-12);
-        assert_eq!(sgp4.gp.bstar, -0.000011606);
-        assert_eq!(sgp4.gp.ephemeris_type, 0);
-        assert_eq!(sgp4.gp.element_set_number, 292);
-        assert_eq!(sgp4.gp.inclination, 51.6416);
-        assert_eq!(sgp4.gp.right_ascension_of_ascending_node, 247.4627);
-        assert_eq!(sgp4.gp.eccentricity, 0.0006703);
-        assert_eq!(sgp4.gp.argument_of_perigee, 130.536);
-        assert_eq!(sgp4.gp.mean_anomaly, 325.0288);
-        assert_eq!(sgp4.gp.mean_motion, 15.72125391);
-        assert_eq!(sgp4.gp.revolution_number_at_epoch, 56353);
-    }
-
-    #[test]
-    fn test_tle_parsing_from_file() {
-        // Define the TLE file path
-        let tle_file_path = "test/tle_file.txt";
-
-        // Parse the TLE file into a SGP4 struct
-        let sgp4s = from_tle_file(tle_file_path);
-        let sgp4_count = sgp4s.len();
-        let iss_sgp4 = &sgp4s[12];
-        let hulianwang_sgp4 = &sgp4s[17];
-
-        // Assert the TLE structs are correct
-        assert_eq!(sgp4_count, 19);
-
-        assert_eq!(iss_sgp4.gp.common_name, "ISS (ZARYA)");
-        assert_eq!(iss_sgp4.gp.satellite_catalog_number, 25544);
-        assert_eq!(iss_sgp4.gp.classification, 'U');
-        assert_eq!(iss_sgp4.gp.international_designator, "98067A");
-        assert_eq!(iss_sgp4.gp.epoch_datetime.year, 2008);
-        assert_eq!(iss_sgp4.gp.epoch_datetime.month, 9);
-        assert_eq!(iss_sgp4.gp.epoch_datetime.day, 20);
-        assert_eq!(iss_sgp4.gp.epoch_datetime.hour, 12);
-        assert_eq!(iss_sgp4.gp.epoch_datetime.minute, 25);
-        assert!((iss_sgp4.gp.epoch_datetime.second - 40.104192).abs() < 1e-9);
-        assert_eq!(iss_sgp4.gp.first_derivative_of_mean_motion, -0.00004364);
-        assert!((iss_sgp4.gp.second_derivative_of_mean_motion + 6.0e-5).abs() < 1e-12);
-        assert_eq!(iss_sgp4.gp.bstar, -0.000011606);
-        assert_eq!(iss_sgp4.gp.ephemeris_type, 0);
-        assert_eq!(iss_sgp4.gp.element_set_number, 292);
-        assert_eq!(iss_sgp4.gp.inclination, 51.6416);
-        assert_eq!(iss_sgp4.gp.right_ascension_of_ascending_node, 247.4627);
-        assert_eq!(iss_sgp4.gp.eccentricity, 0.0006703);
-        assert_eq!(iss_sgp4.gp.argument_of_perigee, 130.536);
-        assert_eq!(iss_sgp4.gp.mean_anomaly, 325.0288);
-        assert_eq!(iss_sgp4.gp.mean_motion, 15.72125391);
-        assert_eq!(iss_sgp4.gp.revolution_number_at_epoch, 56353);
-
-        assert_eq!(hulianwang_sgp4.gp.common_name, "HULIANWANG DIGUI-118");
-        assert_eq!(hulianwang_sgp4.gp.satellite_catalog_number, 66957);
-        assert_eq!(hulianwang_sgp4.gp.classification, 'U');
-        assert_eq!(hulianwang_sgp4.gp.international_designator, "25287E");
-        assert_eq!(hulianwang_sgp4.gp.epoch_datetime.year, 2025);
-        assert_eq!(hulianwang_sgp4.gp.epoch_datetime.month, 12);
-        assert_eq!(hulianwang_sgp4.gp.epoch_datetime.day, 12);
-        assert_eq!(hulianwang_sgp4.gp.epoch_datetime.hour, 16);
-        assert_eq!(hulianwang_sgp4.gp.epoch_datetime.minute, 47);
-        assert!((hulianwang_sgp4.gp.epoch_datetime.second - 31.7748479989).abs() < 1e-9);
-        assert_eq!(hulianwang_sgp4.gp.first_derivative_of_mean_motion, -0.00000302);
-        assert_eq!(hulianwang_sgp4.gp.second_derivative_of_mean_motion, 0.0);
-        assert!((hulianwang_sgp4.gp.bstar + 1.9373e-4).abs() < 1e-12);
-        assert_eq!(hulianwang_sgp4.gp.ephemeris_type, 0);
-        assert_eq!(hulianwang_sgp4.gp.element_set_number, 999);
-        assert_eq!(hulianwang_sgp4.gp.inclination, 86.4945);
-        assert_eq!(hulianwang_sgp4.gp.right_ascension_of_ascending_node, 346.1700);
-        assert_eq!(hulianwang_sgp4.gp.eccentricity, 0.0007219);
-        assert_eq!(hulianwang_sgp4.gp.argument_of_perigee, 190.5502);
-        assert_eq!(hulianwang_sgp4.gp.mean_anomaly, 169.5507);
-        assert_eq!(hulianwang_sgp4.gp.mean_motion, 13.69137019);
-        assert_eq!(hulianwang_sgp4.gp.revolution_number_at_epoch, 52);
-    }
-    
-    #[test]
     fn test_sgp4_vallado_cases() {
         let content = std::fs::read_to_string("test/vallado_cases.toml")
             .expect("could not read test/vallado_cases.toml");
-        let cases: ValladoCases = toml::from_str(&content)
+        let cases: ValladoCases = from_str(&content)
             .expect("could not parse test/vallado_cases.toml");
 
         let mut keys: Vec<&String> = cases.test.keys().collect();

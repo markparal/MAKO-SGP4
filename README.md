@@ -15,9 +15,8 @@ In progress
 In progress
 
 ## Plan / TODOs
-- Refactor code, split into multiple files
-- TLE alpha5 handling
-- OMM / GP dataset handling
+- OMM dataset handling
+- Export as TLE and OMM
 - Package as a crate
 - Write math spec (Jupyter notebook?)
 - Python wrapper
@@ -38,3 +37,5 @@ cargo doc
 - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 - [Fundamentals of Astrodynamics Github Repository by Vallado et al](https://github.com/CelesTrak/fundamentals-of-astrodynamics?tab=readme-ov-file)
 - [History of Analytical Orbit Modeling in the U. S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
+- [Space-Track](https://www.space-track.org/auth/login)
+- [Celestrak](https://celestrak.org/)

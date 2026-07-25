@@ -1,0 +1,287 @@
+# TLE Parsing Verification Test Cases
+#
+# Expected GP fields verified against python-sgp4 (Satrec.twoline2rv).
+# Units match this repo's GenPerturbElementSet conventions:
+#   first_derivative_of_mean_motion = TLE n-dot field * 2  [revs/day^2]
+#   second_derivative_of_mean_motion = decoded field * 6   [revs/day^3]
+#   angles in degrees, mean_motion in revs/day, bstar in 1/Earth radii.
+#
+# The TLEs contained here are derived from Celestrak TLEs and modified 
+# for parser testing. These are not to be used for propagation
+# purposes, but only to validate the parsing of the TLE functions.
+
+[test.case1]
+name = "ISS Example"
+tle = """
+ISS (ZARYA)
+1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+"""
+common_name = "ISS (ZARYA)"
+satellite_catalog_number = 25544
+classification = "U"
+international_designator = "98067A"
+epoch_datetime_year = 2008
+epoch_datetime_month = 9
+epoch_datetime_day = 20
+epoch_datetime_hour = 12
+epoch_datetime_minute = 25
+epoch_datetime_second = 40.104192
+first_derivative_of_mean_motion = -4.364e-05
+second_derivative_of_mean_motion = -6e-05
+bstar = -1.1606e-05
+ephemeris_type = 0
+element_set_number = 292
+inclination = 51.6416
+right_ascension_of_ascending_node = 247.4627
+eccentricity = 0.0006703
+argument_of_perigee = 130.536
+mean_anomaly = 325.0288
+mean_motion = 15.72125391
+revolution_number_at_epoch = 56353
+
+[test.case2]
+name = "Starlink Example"
+tle = """
+STARLINK-36160
+1 66936U 25286M   25348.25003472 -.01316038  51723-3 -33772-2 0  9997
+2 66936  53.1575  43.0011 0000903  85.1106  81.9300 15.94638452  2235
+"""
+common_name = "STARLINK-36160"
+satellite_catalog_number = 66936
+classification = "U"
+international_designator = "25286M"
+epoch_datetime_year = 2025
+epoch_datetime_month = 12
+epoch_datetime_day = 14
+epoch_datetime_hour = 6
+epoch_datetime_minute = 0
+epoch_datetime_second = 2.99980799773039
+first_derivative_of_mean_motion = -0.02632076
+second_derivative_of_mean_motion = 0.00310338
+bstar = -0.0033772
+ephemeris_type = 0
+element_set_number = 999
+inclination = 53.1575
+right_ascension_of_ascending_node = 43.0011
+eccentricity = 9.03e-05
+argument_of_perigee = 85.1106
+mean_anomaly = 81.93
+mean_motion = 15.94638452
+revolution_number_at_epoch = 223
+
+[test.case3]
+name = "CZ-6A R/B Example"
+tle = """
+CZ-6A R/B
+1 66958U 25287F   25348.06588066  .00000234  00000+0  15279-3 0  9994
+2 66958  86.5059 345.5964 0107260  98.1704 263.1653 13.94919786   722
+"""
+common_name = "CZ-6A R/B"
+satellite_catalog_number = 66958
+classification = "U"
+international_designator = "25287F"
+epoch_datetime_year = 2025
+epoch_datetime_month = 12
+epoch_datetime_day = 14
+epoch_datetime_hour = 1
+epoch_datetime_minute = 34
+epoch_datetime_second = 52.0890240004155
+first_derivative_of_mean_motion = 4.68e-06
+second_derivative_of_mean_motion = 0
+bstar = 0.00015279
+ephemeris_type = 0
+element_set_number = 999
+inclination = 86.5059
+right_ascension_of_ascending_node = 345.5964
+eccentricity = 0.010726
+argument_of_perigee = 98.1704
+mean_anomaly = 263.1653
+mean_motion = 13.94919786
+revolution_number_at_epoch = 72
+
+[test.case4]
+name = "Unnamed Spacecraft Example"
+tle = """
+1 66957U 25287E   25346.69967332 -.00000151  00000+0 -19373-3 0  9996
+2 66957  86.4945 346.1700 0007219 190.5502 169.5507 13.69137019   523
+"""
+common_name = ""
+satellite_catalog_number = 66957
+classification = "U"
+international_designator = "25287E"
+epoch_datetime_year = 2025
+epoch_datetime_month = 12
+epoch_datetime_day = 12
+epoch_datetime_hour = 16
+epoch_datetime_minute = 47
+epoch_datetime_second = 31.7748479989677
+first_derivative_of_mean_motion = -3.02e-06
+second_derivative_of_mean_motion = 0
+bstar = -0.00019373
+ephemeris_type = 0
+element_set_number = 999
+inclination = 86.4945
+right_ascension_of_ascending_node = 346.17
+eccentricity = 0.0007219
+argument_of_perigee = 190.5502
+mean_anomaly = 169.5507
+mean_motion = 13.69137019
+revolution_number_at_epoch = 52
+
+[test.case5]
+name = "Incorrect Checksum Example"
+tle = """
+STARLINK-36122
+1 66952U 25286AD  25348.25003472 -.01382664  57206-3 -33536-2 0  9997
+2 66952  53.1569  42.9534 0000945  80.2363 109.4887 15.95696977  2234
+"""
+common_name = "STARLINK-36122"
+satellite_catalog_number = 66952
+classification = "U"
+international_designator = "25286AD"
+epoch_datetime_year = 2025
+epoch_datetime_month = 12
+epoch_datetime_day = 14
+epoch_datetime_hour = 6
+epoch_datetime_minute = 0
+epoch_datetime_second = 2.99980799773039
+first_derivative_of_mean_motion = -0.02765328
+second_derivative_of_mean_motion = 0.00343236
+bstar = -0.0033536
+ephemeris_type = 0
+element_set_number = 999
+inclination = 53.1569
+right_ascension_of_ascending_node = 42.9534
+eccentricity = 9.45e-05
+argument_of_perigee = 80.2363
+mean_anomaly = 109.4887
+mean_motion = 15.95696977
+revolution_number_at_epoch = 223
+
+[test.case6]
+name = "No International Designator Example"
+tle = """
+HULIANWANG DIGUI-114
+1 66953U          25345.23875512  .00000028  00000+0  13584-4 0  9995
+2 66953  86.4966 346.7027 0008550 209.4482 150.6197 13.68688345   322
+"""
+common_name = "HULIANWANG DIGUI-114"
+satellite_catalog_number = 66953
+classification = "U"
+international_designator = ""
+epoch_datetime_year = 2025
+epoch_datetime_month = 12
+epoch_datetime_day = 11
+epoch_datetime_hour = 5
+epoch_datetime_minute = 43
+epoch_datetime_second = 48.4423680006512
+first_derivative_of_mean_motion = 5.6e-07
+second_derivative_of_mean_motion = 0
+bstar = 1.3584e-05
+ephemeris_type = 0
+element_set_number = 999
+inclination = 86.4966
+right_ascension_of_ascending_node = 346.7027
+eccentricity = 0.000855
+argument_of_perigee = 209.4482
+mean_anomaly = 150.6197
+mean_motion = 13.68688345
+revolution_number_at_epoch = 32
+
+[test.case7]
+name = "Alpha-5 A-H Example"
+tle = """
+STARLINK-36127
+1 E8493U 25286L   25348.25003472 -.01304084  50832-3 -33594-2 0  9991
+2 E8493  53.1575  43.0040 0000911  80.5967  84.9399 15.94564907  2238
+"""
+common_name = "STARLINK-36127"
+satellite_catalog_number = 148493
+classification = "U"
+international_designator = "25286L"
+epoch_datetime_year = 2025
+epoch_datetime_month = 12
+epoch_datetime_day = 14
+epoch_datetime_hour = 6
+epoch_datetime_minute = 0
+epoch_datetime_second = 2.99980799773039
+first_derivative_of_mean_motion = -0.02608168
+second_derivative_of_mean_motion = 0.00304992
+bstar = -0.0033594
+ephemeris_type = 0
+element_set_number = 999
+inclination = 53.1575
+right_ascension_of_ascending_node = 43.004
+eccentricity = 9.11e-05
+argument_of_perigee = 80.5967
+mean_anomaly = 84.9399
+mean_motion = 15.94564907
+revolution_number_at_epoch = 223
+
+[test.case8]
+name = "Alpha-5 J-N Example"
+tle = """
+1 J2931U 25286L   25348.25003472 -.01304084  50832-3 -33594-2 0  9992
+2 J2931  53.1575  43.0040 0000911  80.5967  84.9399 15.94564907  2239
+"""
+common_name = ""
+satellite_catalog_number = 182931
+classification = "U"
+international_designator = "25286L"
+epoch_datetime_year = 2025
+epoch_datetime_month = 12
+epoch_datetime_day = 14
+epoch_datetime_hour = 6
+epoch_datetime_minute = 0
+epoch_datetime_second = 2.99980799773039
+first_derivative_of_mean_motion = -0.02608168
+second_derivative_of_mean_motion = 0.00304992
+bstar = -0.0033594
+ephemeris_type = 0
+element_set_number = 999
+inclination = 53.1575
+right_ascension_of_ascending_node = 43.004
+eccentricity = 9.11e-05
+argument_of_perigee = 80.5967
+mean_anomaly = 84.9399
+mean_motion = 15.94564907
+revolution_number_at_epoch = 223
+
+[test.case9]
+name = "Alpha-5 P-Z Example"
+tle = """
+1 W1928U 25286L   25348.25003472 -.01304084  50832-3 -33594-2 0  9997
+2 W1928  53.1575  43.0040 0000911  80.5967  84.9399 15.94564907  2234
+"""
+common_name = ""
+satellite_catalog_number = 301928
+classification = "U"
+international_designator = "25286L"
+epoch_datetime_year = 2025
+epoch_datetime_month = 12
+epoch_datetime_day = 14
+epoch_datetime_hour = 6
+epoch_datetime_minute = 0
+epoch_datetime_second = 2.99980799773039
+first_derivative_of_mean_motion = -0.02608168
+second_derivative_of_mean_motion = 0.00304992
+bstar = -0.0033594
+ephemeris_type = 0
+element_set_number = 999
+inclination = 53.1575
+right_ascension_of_ascending_node = 43.004
+eccentricity = 9.11e-05
+argument_of_perigee = 80.5967
+mean_anomaly = 84.9399
+mean_motion = 15.94564907
+revolution_number_at_epoch = 223
+
+[test.case10]
+name = "Extra Space Example"
+tle = """
+1 25544U 98067A    08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+"""
+# line1 length is 70 (extra space before epoch); expect parse failure / panic
+exception = true
