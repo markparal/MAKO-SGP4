@@ -15,7 +15,6 @@ In progress
 In progress
 
 ## Plan / TODOs
-- OMM dataset handling
 - Export as TLE and OMM
 - Package as a crate
 - Write math spec (Jupyter notebook?)

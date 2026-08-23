@@ -1,0 +1,349 @@
+# OMM Parsing Verification Test Cases
+#
+# Expected GP fields verified against python-sgp4 (sgp4.omm.initialize).
+# Units match this repo's GenPerturbElementSet conventions:
+# - first_derivative_of_mean_motion = OMM MEAN_MOTION_DOT * 2  [revs/day^2]
+# - second_derivative_of_mean_motion = OMM MEAN_MOTION_DDOT * 6 [revs/day^3]
+# - angles in degrees, mean_motion in revs/day, bstar in 1/Earth radii
+#
+# The OMMs contained here are derived from Celestrak OMM data and modified
+# for parser testing. These are not to be used for propagation
+# purposes, but only to validate the parsing of the OMM functions.
+
+[test.case1]
+name = "Nominal Example 1"
+omm_kvn = """
+CCSDS_OMM_VERS = 2.0
+CREATION_DATE  = 
+ORIGINATOR     = 
+
+OBJECT_NAME    = 2026-106A
+OBJECT_ID      = 2026-106A
+CENTER_NAME    = EARTH
+REF_FRAME      = TEME
+TIME_SYSTEM    = UTC
+MEAN_ELEMENT_THEORY = SGP/SGP4
+
+EPOCH          = 2026-06-14T15:07:48.259488
+MEAN_MOTION    = 15.11169557
+ECCENTRICITY   = .00147468
+INCLINATION    = 97.5103
+RA_OF_ASC_NODE = 247.7605
+ARG_OF_PERICENTER = 169.6213
+MEAN_ANOMALY   = 190.5325
+
+EPHEMERIS_TYPE = 0
+CLASSIFICATION_TYPE = U
+NORAD_CAT_ID   = 69097
+ELEMENT_SET_NO = 999
+REV_AT_EPOCH   = 459
+BSTAR          = .39221734E-3
+MEAN_MOTION_DOT = .6535E-4
+MEAN_MOTION_DDOT = 0
+"""
+common_name = "2026-106A"
+satellite_catalog_number = 69097
+classification = "U"
+international_designator = "2026-106A"
+epoch_datetime_year = 2026
+epoch_datetime_month = 6
+epoch_datetime_day = 14
+epoch_datetime_hour = 15
+epoch_datetime_minute = 7
+epoch_datetime_second = 48.259488
+first_derivative_of_mean_motion = 0.0001307
+second_derivative_of_mean_motion = 0
+bstar = 0.00039221734
+ephemeris_type = 0
+element_set_number = 999
+inclination = 97.5103
+right_ascension_of_ascending_node = 247.7605
+eccentricity = 0.00147468
+argument_of_perigee = 169.6213
+mean_anomaly = 190.5325
+mean_motion = 15.11169557
+revolution_number_at_epoch = 459
+
+[test.case2]
+name = "Nominal Example 2"
+omm_kvn = """
+CCSDS_OMM_VERS = 2.0
+CREATION_DATE  = 
+ORIGINATOR     = 
+
+OBJECT_NAME    = LIJIAN-1 R/B
+OBJECT_ID      = 2026-106F
+CENTER_NAME    = EARTH
+REF_FRAME      = TEME
+TIME_SYSTEM    = UTC
+MEAN_ELEMENT_THEORY = SGP/SGP4
+
+EPOCH          = 2026-06-14T14:26:44.297376
+MEAN_MOTION    = 15.53276309
+ECCENTRICITY   = .01719327
+INCLINATION    = 97.5048
+RA_OF_ASC_NODE = 249.6498
+ARG_OF_PERICENTER = 263.7669
+MEAN_ANOMALY   = 94.3975
+
+EPHEMERIS_TYPE = 0
+CLASSIFICATION_TYPE = U
+NORAD_CAT_ID   = 69102
+ELEMENT_SET_NO = 999
+REV_AT_EPOCH   = 471
+BSTAR          = .33077879E-3
+MEAN_MOTION_DOT = .39399E-3
+MEAN_MOTION_DDOT = .2638454E-5
+"""
+common_name = "LIJIAN-1 R/B"
+satellite_catalog_number = 69102
+classification = "U"
+international_designator = "2026-106F"
+epoch_datetime_year = 2026
+epoch_datetime_month = 6
+epoch_datetime_day = 14
+epoch_datetime_hour = 14
+epoch_datetime_minute = 26
+epoch_datetime_second = 44.297376
+first_derivative_of_mean_motion = 0.00078798
+second_derivative_of_mean_motion = 1.5830724e-05
+bstar = 0.00033077879
+ephemeris_type = 0
+element_set_number = 999
+inclination = 97.5048
+right_ascension_of_ascending_node = 249.6498
+eccentricity = 0.01719327
+argument_of_perigee = 263.7669
+mean_anomaly = 94.3975
+mean_motion = 15.53276309
+revolution_number_at_epoch = 471
+
+[test.case3]
+name = "Nominal Example 3"
+omm_kvn = """
+CCSDS_OMM_VERS = 2.0
+CREATION_DATE  = 
+ORIGINATOR     = 
+
+OBJECT_NAME    = QIANFAN-145
+OBJECT_ID      = 2026-108A
+CENTER_NAME    = EARTH
+REF_FRAME      = TEME
+TIME_SYSTEM    = UTC
+MEAN_ELEMENT_THEORY = SGP/SGP4
+
+EPOCH          = 2026-06-13T19:46:02.423424
+MEAN_MOTION    = 14.05311278
+ECCENTRICITY   = .00142575
+INCLINATION    = 89.0101
+RA_OF_ASC_NODE = 22.5972
+ARG_OF_PERICENTER = 132.4130
+MEAN_ANOMALY   = 227.8260
+
+EPHEMERIS_TYPE = 0
+CLASSIFICATION_TYPE = U
+NORAD_CAT_ID   = 69104
+ELEMENT_SET_NO = 999
+REV_AT_EPOCH   = 386
+BSTAR          = -.13825206E+1
+MEAN_MOTION_DOT = -.207394E-1
+MEAN_MOTION_DDOT = 0
+"""
+common_name = "QIANFAN-145"
+satellite_catalog_number = 69104
+classification = "U"
+international_designator = "2026-108A"
+epoch_datetime_year = 2026
+epoch_datetime_month = 6
+epoch_datetime_day = 13
+epoch_datetime_hour = 19
+epoch_datetime_minute = 46
+epoch_datetime_second = 2.423424
+first_derivative_of_mean_motion = -0.0414788
+second_derivative_of_mean_motion = 0
+bstar = -1.3825206
+ephemeris_type = 0
+element_set_number = 999
+inclination = 89.0101
+right_ascension_of_ascending_node = 22.5972
+eccentricity = 0.00142575
+argument_of_perigee = 132.413
+mean_anomaly = 227.826
+mean_motion = 14.05311278
+revolution_number_at_epoch = 386
+
+[test.case4]
+name = "Unnamed Spacecraft Example"
+omm_kvn = """
+CCSDS_OMM_VERS = 2.0
+CREATION_DATE  = 
+ORIGINATOR     = 
+
+OBJECT_NAME    = 
+OBJECT_ID      = 2026-106B
+CENTER_NAME    = EARTH
+REF_FRAME      = TEME
+TIME_SYSTEM    = UTC
+MEAN_ELEMENT_THEORY = SGP/SGP4
+
+EPOCH          = 2026-06-14T13:54:14.416128
+MEAN_MOTION    = 15.09659654
+ECCENTRICITY   = .00151407
+INCLINATION    = 97.5082
+RA_OF_ASC_NODE = 247.6690
+ARG_OF_PERICENTER = 165.9823
+MEAN_ANOMALY   = 194.1830
+
+EPHEMERIS_TYPE = 0
+CLASSIFICATION_TYPE = U
+NORAD_CAT_ID   = 69098
+ELEMENT_SET_NO = 999
+REV_AT_EPOCH   = 458
+BSTAR          = .2935723E-3
+MEAN_MOTION_DOT = .4675E-4
+MEAN_MOTION_DDOT = 0
+"""
+common_name = ""
+satellite_catalog_number = 69098
+classification = "U"
+international_designator = "2026-106B"
+epoch_datetime_year = 2026
+epoch_datetime_month = 6
+epoch_datetime_day = 14
+epoch_datetime_hour = 13
+epoch_datetime_minute = 54
+epoch_datetime_second = 14.416128
+first_derivative_of_mean_motion = 9.35e-05
+second_derivative_of_mean_motion = 0
+bstar = 0.0002935723
+ephemeris_type = 0
+element_set_number = 999
+inclination = 97.5082
+right_ascension_of_ascending_node = 247.669
+eccentricity = 0.00151407
+argument_of_perigee = 165.9823
+mean_anomaly = 194.183
+mean_motion = 15.09659654
+revolution_number_at_epoch = 458
+
+[test.case5]
+name = "No International Designator Example"
+omm_kvn = """
+CCSDS_OMM_VERS = 2.0
+CREATION_DATE  = 
+ORIGINATOR     = 
+
+OBJECT_NAME    = DRAGON CRS-34
+OBJECT_ID      = 
+CENTER_NAME    = EARTH
+REF_FRAME      = TEME
+TIME_SYSTEM    = UTC
+MEAN_ELEMENT_THEORY = SGP/SGP4
+
+EPOCH          = 2026-06-14T11:31:37.334208
+MEAN_MOTION    = 15.49225904
+ECCENTRICITY   = .00049254
+INCLINATION    = 51.6335
+RA_OF_ASC_NODE = 313.4905
+ARG_OF_PERICENTER = 185.2578
+MEAN_ANOMALY   = 174.8360
+
+EPHEMERIS_TYPE = 0
+CLASSIFICATION_TYPE = U
+NORAD_CAT_ID   = 69103
+ELEMENT_SET_NO = 999
+REV_AT_EPOCH   = 57144
+BSTAR          = .15997538E-3
+MEAN_MOTION_DOT = .8443E-4
+MEAN_MOTION_DDOT = 0
+"""
+common_name = "DRAGON CRS-34"
+satellite_catalog_number = 69103
+classification = "U"
+international_designator = ""
+epoch_datetime_year = 2026
+epoch_datetime_month = 6
+epoch_datetime_day = 14
+epoch_datetime_hour = 11
+epoch_datetime_minute = 31
+epoch_datetime_second = 37.334208
+first_derivative_of_mean_motion = 0.00016886
+second_derivative_of_mean_motion = 0
+bstar = 0.00015997538
+ephemeris_type = 0
+element_set_number = 999
+inclination = 51.6335
+right_ascension_of_ascending_node = 313.4905
+eccentricity = 0.00049254
+argument_of_perigee = 185.2578
+mean_anomaly = 174.836
+mean_motion = 15.49225904
+revolution_number_at_epoch = 57144
+
+[test.case6]
+name = "Commented Example"
+omm_kvn = """
+CCSDS_OMM_VERS = 2.0
+COMMENT Parser test comment: this line should be ignored
+CREATION_DATE  = 
+ORIGINATOR     = 
+
+OBJECT_NAME    = 2026-106C
+OBJECT_ID      = 2026-106C
+CENTER_NAME    = EARTH
+REF_FRAME      = TEME
+TIME_SYSTEM    = UTC
+MEAN_ELEMENT_THEORY = SGP/SGP4
+COMMENT Another comment between metadata and mean elements
+
+EPOCH          = 2026-06-14T15:06:38.118240
+MEAN_MOTION    = 15.11211868
+ECCENTRICITY   = .00145205
+INCLINATION    = 97.5107
+RA_OF_ASC_NODE = 247.7630
+ARG_OF_PERICENTER = 170.4103
+MEAN_ANOMALY   = 189.7407
+
+EPHEMERIS_TYPE = 0
+CLASSIFICATION_TYPE = U
+NORAD_CAT_ID   = 69099
+ELEMENT_SET_NO = 999
+REV_AT_EPOCH   = 459
+BSTAR          = .38709238E-3
+MEAN_MOTION_DOT = .6456E-4
+MEAN_MOTION_DDOT = 0
+"""
+common_name = "2026-106C"
+satellite_catalog_number = 69099
+classification = "U"
+international_designator = "2026-106C"
+epoch_datetime_year = 2026
+epoch_datetime_month = 6
+epoch_datetime_day = 14
+epoch_datetime_hour = 15
+epoch_datetime_minute = 6
+epoch_datetime_second = 38.11824
+first_derivative_of_mean_motion = 0.00012912
+second_derivative_of_mean_motion = 0
+bstar = 0.00038709238
+ephemeris_type = 0
+element_set_number = 999
+inclination = 97.5107
+right_ascension_of_ascending_node = 247.763
+eccentricity = 0.00145205
+argument_of_perigee = 170.4103
+mean_anomaly = 189.7407
+mean_motion = 15.11211868
+revolution_number_at_epoch = 459
+
+[test.case7]
+name = "Empty Example"
+omm_kvn = """
+CCSDS_OMM_VERS = 2.0
+CREATION_DATE  = 
+ORIGINATOR     = 
+OBJECT_NAME    = 
+OBJECT_ID      = 
+"""
+# empty / header-only OMM; expect init_sgp4 to panic
+exception = true
