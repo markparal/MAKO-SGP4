@@ -1,6 +1,6 @@
 //! Module to handle the input and processing of GP (General Perturbation)
 //! elements. Element sets can be parsed from TLE (including Alpha-5 catalog
-//! numbers) and OMM formats.
+//! numbers) and OMM formats, and written back to OMM KVN, XML, JSON, and CSV.
 
 // ------------------
 // External Libraries
@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::fs;
 
-use csv::ReaderBuilder;
+use csv::{ReaderBuilder, WriterBuilder};
 use roxmltree::{Document, Node};
 use serde_json::Value;
 
@@ -677,6 +677,7 @@ pub fn alpha5_digit(c: char) -> Option<i32> {
 ///
 /// # References
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_kvn_lines(lines: &[&str]) -> Sgp4 {
     return sgp4_from_omm_lookup(|field| kvn_lookup(lines, field));
@@ -734,6 +735,7 @@ pub fn from_omm_kvn_lines(lines: &[&str]) -> Sgp4 {
 ///
 /// # References
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
     // Split the string into individual OMM records
@@ -800,6 +802,7 @@ pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
 ///
 /// # References
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_kvn_file(omm_kvn_file_path: &str) -> Vec<Sgp4> {
     // Open the OMM KVN file
@@ -996,6 +999,374 @@ fn clean_kvn_value(value: &str) -> String {
     return v.to_string();
 }
 
+/// Format one CCSDS KVN keyword and value line
+///
+/// Keywords of 14 characters or fewer are padded so the equals sign aligns
+/// with Celestrak OMM KVN files.
+///
+/// # Arguments
+/// * `keyword` - The KVN keyword
+/// * `value` - The KVN value
+///
+/// # Returns
+/// * One `KEYWORD = VALUE` line
+fn format_kvn_line(keyword: &str, value: &str) -> String {
+    if keyword.len() >= 14 {
+        format!("{} = {}", keyword, value)
+    } else {
+        format!("{:<14} = {}", keyword, value)
+    }
+}
+
+/// Trim trailing zeros from a decimal string
+///
+/// # Arguments
+/// * `value` - A decimal number already formatted as text
+///
+/// # Returns
+/// * The number text without trailing fractional zeros
+fn trim_decimal_zeros(value: &str) -> String {
+    if !value.contains('.') {
+        return value.to_string();
+    }
+
+    let trimmed = value.trim_end_matches('0');
+    if trimmed.ends_with('.') {
+        return trimmed.trim_end_matches('.').to_string();
+    }
+    return trimmed.to_string();
+}
+
+/// Strip a leading zero before a decimal point
+///
+/// Celestrak OMM text uses `.00147468` rather than `0.00147468`. Whole
+/// numbers such as `0` are left unchanged.
+///
+/// # Arguments
+/// * `value` - A decimal number already formatted as text
+///
+/// # Returns
+/// * The number text without a leading zero before the decimal point
+fn strip_leading_decimal_zero(value: &str) -> String {
+    if let Some(rest) = value.strip_prefix("-0.") {
+        return format!("-.{}", rest);
+    }
+    if let Some(rest) = value.strip_prefix("0.") {
+        return format!(".{}", rest);
+    }
+    return value.to_string();
+}
+
+/// Format an OMM decimal number
+///
+/// Rounds to 12 decimal places to suppress binary float noise, then drops
+/// trailing zeros. Values between -1 and 1 are written without a leading
+/// zero (`.###`). Zero is written as `0`.
+///
+/// # Arguments
+/// * `value` - The number to format
+///
+/// # Returns
+/// * Decimal text suitable for a KVN, XML, or CSV value
+fn format_omm_decimal(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+
+    let rounded = (value * 1e12).round() / 1e12;
+    return strip_leading_decimal_zero(&trim_decimal_zeros(&format!("{:.12}", rounded)));
+}
+
+/// Format an OMM scientific-notation number
+///
+/// Matches Celestrak style: a leading decimal mantissa and an explicit
+/// exponent sign, for example `.39221734E-3`. Zero is written as `0`.
+///
+/// # Arguments
+/// * `value` - The number to format
+///
+/// # Returns
+/// * Scientific-notation text suitable for BSTAR, MEAN_MOTION_DOT, and
+///   MEAN_MOTION_DDOT
+fn format_omm_sci(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+
+    let sign = if value < 0.0 { "-" } else { "" };
+    let abs = value.abs();
+
+    // Mantissa in [0.1, 1) so the leading digit sits after the decimal point
+    let mut exp = abs.log10().floor() as i32 + 1;
+    let mut mantissa = abs / 10f64.powi(exp);
+
+    if mantissa >= 1.0 {
+        mantissa /= 10.0;
+        exp += 1;
+    } else if mantissa < 0.1 {
+        mantissa *= 10.0;
+        exp -= 1;
+    }
+
+    // 10 digits after the decimal, then drop trailing zeros
+    const SCALE: f64 = 10_000_000_000.0;
+    let mut digits = (mantissa * SCALE).round() as i64;
+    if digits >= 10_000_000_000 {
+        exp += 1;
+        digits = 1_000_000_000;
+    }
+
+    let mut frac = format!("{:010}", digits);
+    frac = frac.trim_end_matches('0').to_string();
+    if frac.is_empty() {
+        frac = "0".to_string();
+    }
+
+    let exp_sign = if exp >= 0 { "+" } else { "-" };
+    return format!("{}.{}E{}{}", sign, frac, exp_sign, exp.abs());
+}
+
+/// Format an OMM EPOCH string from a UTC datetime
+///
+/// Writes `YYYY-MM-DDTHH:MM:SS.ssssss` with six fractional-second digits.
+///
+/// # Arguments
+/// * `epoch` - The epoch datetime
+///
+/// # Returns
+/// * The EPOCH value in CCSDS calendar form
+fn format_omm_epoch(epoch: &DateTime) -> String {
+    let mut second = epoch.second;
+    if second < 0.0 {
+        second = 0.0;
+    }
+    if second >= 60.0 {
+        second = 59.999999;
+    }
+
+    return format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:09.6}",
+        epoch.year, epoch.month, epoch.day, epoch.hour, epoch.minute, second
+    );
+}
+
+/// Format a classification character for OMM export
+///
+/// Non-printable values default to unclassified (`U`).
+///
+/// # Arguments
+/// * `classification` - The GP classification character
+///
+/// # Returns
+/// * A single-character CLASSIFICATION_TYPE value
+fn format_omm_classification(classification: char) -> String {
+    if classification.is_ascii_graphic() {
+        return classification.to_string();
+    }
+    return "U".to_string();
+}
+
+/// Build one OMM KVN record from a general perturbation element set
+///
+/// Metadata that is not stored on [`GenPerturbElementSet`] is filled with
+/// SGP4 defaults. MEAN_MOTION_DOT and MEAN_MOTION_DDOT are written as the
+/// TLE-printed values (stored derivatives divided by 2 and 6).
+///
+/// # Arguments
+/// * `gp` - The element set to serialize
+///
+/// # Returns
+/// * One OMM record in KVN format, including a trailing newline
+fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
+    // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
+    let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
+    let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
+
+    let mut lines: Vec<String> = Vec::new();
+
+    // Header
+    lines.push(format_kvn_line("CCSDS_OMM_VERS", "2.0"));
+    lines.push(format_kvn_line("CREATION_DATE", ""));
+    lines.push(format_kvn_line("ORIGINATOR", ""));
+    lines.push(String::new());
+
+    // Metadata
+    lines.push(format_kvn_line("OBJECT_NAME", &gp.common_name));
+    lines.push(format_kvn_line("OBJECT_ID", &gp.international_designator));
+    lines.push(format_kvn_line("CENTER_NAME", "EARTH"));
+    lines.push(format_kvn_line("REF_FRAME", "TEME"));
+    lines.push(format_kvn_line("TIME_SYSTEM", "UTC"));
+    lines.push(format_kvn_line("MEAN_ELEMENT_THEORY", "SGP/SGP4"));
+    lines.push(String::new());
+
+    // Mean elements
+    lines.push(format_kvn_line(
+        "EPOCH",
+        &format_omm_epoch(&gp.epoch_datetime),
+    ));
+    lines.push(format_kvn_line(
+        "MEAN_MOTION",
+        &format_omm_decimal(gp.mean_motion),
+    ));
+    lines.push(format_kvn_line(
+        "ECCENTRICITY",
+        &format_omm_decimal(gp.eccentricity),
+    ));
+    lines.push(format_kvn_line(
+        "INCLINATION",
+        &format_omm_decimal(gp.inclination),
+    ));
+    lines.push(format_kvn_line(
+        "RA_OF_ASC_NODE",
+        &format_omm_decimal(gp.right_ascension_of_ascending_node),
+    ));
+    lines.push(format_kvn_line(
+        "ARG_OF_PERICENTER",
+        &format_omm_decimal(gp.argument_of_perigee),
+    ));
+    lines.push(format_kvn_line(
+        "MEAN_ANOMALY",
+        &format_omm_decimal(gp.mean_anomaly),
+    ));
+    lines.push(String::new());
+
+    // TLE / SGP4 parameters
+    lines.push(format_kvn_line(
+        "EPHEMERIS_TYPE",
+        &gp.ephemeris_type.to_string(),
+    ));
+    lines.push(format_kvn_line(
+        "CLASSIFICATION_TYPE",
+        &format_omm_classification(gp.classification),
+    ));
+    lines.push(format_kvn_line(
+        "NORAD_CAT_ID",
+        &gp.satellite_catalog_number.to_string(),
+    ));
+    lines.push(format_kvn_line(
+        "ELEMENT_SET_NO",
+        &gp.element_set_number.to_string(),
+    ));
+    lines.push(format_kvn_line(
+        "REV_AT_EPOCH",
+        &gp.revolution_number_at_epoch.to_string(),
+    ));
+    lines.push(format_kvn_line("BSTAR", &format_omm_sci(gp.bstar)));
+    lines.push(format_kvn_line(
+        "MEAN_MOTION_DOT",
+        &format_omm_sci(mean_motion_dot),
+    ));
+    lines.push(format_kvn_line(
+        "MEAN_MOTION_DDOT",
+        &format_omm_sci(mean_motion_ddot),
+    ));
+
+    // Trailing newline so concatenated records split on CCSDS_OMM_VERS
+    lines.push(String::new());
+    return lines.join("\n");
+}
+
+/// Builds a CCSDS KVN OMM string from a slice of [`Sgp4`] structs.
+///
+/// Each element set is written as one OMM record starting with
+/// `CCSDS_OMM_VERS`. Metadata fields that are not stored on
+/// [`GenPerturbElementSet`] are filled with SGP4 defaults: Earth-centered,
+/// TEME, UTC, and SGP/SGP4. CREATION_DATE and ORIGINATOR are left empty.
+/// OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
+/// (the stored derivatives divided by 2 and 6).
+///
+/// An empty slice produces an empty string.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+///
+/// # Returns
+/// * `String` - One or more OMM records in KVN format
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_omm_kvn_string, to_omm_kvn_string};
+///
+/// // Define the OMM KVN string
+/// let omm = "\
+/// CCSDS_OMM_VERS = 2.0
+/// OBJECT_NAME    = 2026-106A
+/// OBJECT_ID      = 2026-106A
+/// EPOCH          = 2026-06-14T15:07:48.259488
+/// MEAN_MOTION    = 15.11169557
+/// ECCENTRICITY   = .00147468
+/// INCLINATION    = 97.5103
+/// RA_OF_ASC_NODE = 247.7605
+/// ARG_OF_PERICENTER = 169.6213
+/// MEAN_ANOMALY   = 190.5325
+/// NORAD_CAT_ID   = 69097
+/// BSTAR          = .39221734E-3
+/// MEAN_MOTION_DOT = .6535E-4
+/// MEAN_MOTION_DDOT = 0
+/// ";
+///
+/// // Export the parsed element sets back to KVN
+/// let sgp4s = from_omm_kvn_string(omm);
+/// let exported = to_omm_kvn_string(&sgp4s);
+/// let reparsed = from_omm_kvn_string(&exported);
+///
+/// // Assert the round-trip catalog number is unchanged
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// ```
+///
+/// # References
+/// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
+/// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
+    // Serialize each element set as one KVN record
+    let mut records = String::new();
+    for sgp4 in sgp4s {
+        records.push_str(&gp_to_omm_kvn(&sgp4.gp));
+    }
+
+    return records;
+}
+
+/// Writes a CCSDS KVN OMM file from a slice of [`Sgp4`] structs.
+///
+/// This function serializes the provided element sets with
+/// [`to_omm_kvn_string`] and writes the result to `omm_kvn_file_path`.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+/// * `omm_kvn_file_path` - Destination path for the KVN file
+///
+/// # Panics
+/// * If the file cannot be written
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_omm_kvn_file, to_omm_kvn_file};
+///
+/// // Parse the OMM KVN test file
+/// let sgp4s = from_omm_kvn_file("test/omm_parsing_cases.txt");
+///
+/// // Write the element sets to test/export
+/// std::fs::create_dir_all("test/export").expect("could not create test/export");
+/// let out_path = "test/export/omm_kvn.txt";
+/// to_omm_kvn_file(&sgp4s, out_path);
+///
+/// // Parse the written file and assert the catalog number
+/// let reparsed = from_omm_kvn_file(out_path);
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// ```
+///
+/// # References
+/// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
+/// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+pub fn to_omm_kvn_file(sgp4s: &[Sgp4], omm_kvn_file_path: &str) {
+    // Serialize the element sets and write the KVN file
+    let omm_kvn_string = to_omm_kvn_string(sgp4s);
+    fs::write(omm_kvn_file_path, omm_kvn_string).expect("Cannot write OMM KVN file");
+}
+
 /// Collect leaf OMM keyword values from one XML omm element
 ///
 /// Wrapper tags (metadata, meanElements, tleParameters) and COMMENT elements
@@ -1092,6 +1463,7 @@ fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
 ///
 /// # References
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
     // Parse the XML document
@@ -1152,6 +1524,7 @@ pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
 ///
 /// # References
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_xml_file(omm_xml_file_path: &str) -> Vec<Sgp4> {
     // Open the OMM XML file
@@ -1162,6 +1535,257 @@ pub fn from_omm_xml_file(omm_xml_file_path: &str) -> Vec<Sgp4> {
 
     // Return the vector of SGP4 structs
     return sgp4s;
+}
+
+/// Escape text for inclusion in an XML element
+///
+/// Replaces the five XML markup characters so satellite names and other
+/// free-text fields remain well-formed.
+///
+/// # Arguments
+/// * `value` - The raw text to escape
+///
+/// # Returns
+/// * The escaped text
+fn escape_xml_text(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            _ => escaped.push(c),
+        }
+    }
+    return escaped;
+}
+
+/// Format one XML element from a keyword and value
+///
+/// Empty values are written as a self-closing tag, matching Celestrak OMM XML.
+///
+/// # Arguments
+/// * `name` - The XML element name
+/// * `value` - The element text
+///
+/// # Returns
+/// * One XML element
+fn format_xml_tag(name: &str, value: &str) -> String {
+    if value.is_empty() {
+        format!("<{} />", name)
+    } else {
+        format!("<{}>{}</{}>", name, escape_xml_text(value), name)
+    }
+}
+
+/// Build one OMM XML record from a general perturbation element set
+///
+/// Metadata that is not stored on [`GenPerturbElementSet`] is filled with
+/// SGP4 defaults. MEAN_MOTION_DOT and MEAN_MOTION_DDOT are written as the
+/// TLE-printed values (stored derivatives divided by 2 and 6). Layout matches
+/// Celestrak: the `omm` opening tag on its own line, then the record body
+/// packed onto the next line.
+///
+/// # Arguments
+/// * `gp` - The element set to serialize
+///
+/// # Returns
+/// * One `omm` element, including a trailing newline
+fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
+    // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
+    let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
+    let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
+
+    let mut xml = String::from("<omm id=\"CCSDS_OMM_VERS\" version=\"2.0\">\n");
+    xml.push_str("<header><CREATION_DATE /><ORIGINATOR /></header>");
+    xml.push_str("<body><segment><metadata>");
+    xml.push_str(&format_xml_tag("OBJECT_NAME", &gp.common_name));
+    xml.push_str(&format_xml_tag("OBJECT_ID", &gp.international_designator));
+    xml.push_str(&format_xml_tag("CENTER_NAME", "EARTH"));
+    xml.push_str(&format_xml_tag("REF_FRAME", "TEME"));
+    xml.push_str(&format_xml_tag("TIME_SYSTEM", "UTC"));
+    xml.push_str(&format_xml_tag("MEAN_ELEMENT_THEORY", "SGP4"));
+    xml.push_str("</metadata><data><meanElements>");
+    xml.push_str(&format_xml_tag(
+        "EPOCH",
+        &format_omm_epoch(&gp.epoch_datetime),
+    ));
+    xml.push_str(&format_xml_tag(
+        "MEAN_MOTION",
+        &format_omm_decimal(gp.mean_motion),
+    ));
+    xml.push_str(&format_xml_tag(
+        "ECCENTRICITY",
+        &format_omm_decimal(gp.eccentricity),
+    ));
+    xml.push_str(&format_xml_tag(
+        "INCLINATION",
+        &format_omm_decimal(gp.inclination),
+    ));
+    xml.push_str(&format_xml_tag(
+        "RA_OF_ASC_NODE",
+        &format_omm_decimal(gp.right_ascension_of_ascending_node),
+    ));
+    xml.push_str(&format_xml_tag(
+        "ARG_OF_PERICENTER",
+        &format_omm_decimal(gp.argument_of_perigee),
+    ));
+    xml.push_str(&format_xml_tag(
+        "MEAN_ANOMALY",
+        &format_omm_decimal(gp.mean_anomaly),
+    ));
+    xml.push_str("</meanElements><tleParameters>");
+    xml.push_str(&format_xml_tag(
+        "EPHEMERIS_TYPE",
+        &gp.ephemeris_type.to_string(),
+    ));
+    xml.push_str(&format_xml_tag(
+        "CLASSIFICATION_TYPE",
+        &format_omm_classification(gp.classification),
+    ));
+    xml.push_str(&format_xml_tag(
+        "NORAD_CAT_ID",
+        &gp.satellite_catalog_number.to_string(),
+    ));
+    xml.push_str(&format_xml_tag(
+        "ELEMENT_SET_NO",
+        &gp.element_set_number.to_string(),
+    ));
+    xml.push_str(&format_xml_tag(
+        "REV_AT_EPOCH",
+        &gp.revolution_number_at_epoch.to_string(),
+    ));
+    xml.push_str(&format_xml_tag("BSTAR", &format_omm_sci(gp.bstar)));
+    xml.push_str(&format_xml_tag(
+        "MEAN_MOTION_DOT",
+        &format_omm_sci(mean_motion_dot),
+    ));
+    xml.push_str(&format_xml_tag(
+        "MEAN_MOTION_DDOT",
+        &format_omm_sci(mean_motion_ddot),
+    ));
+    xml.push_str("</tleParameters></data></segment></body></omm>\n");
+
+    return xml;
+}
+
+/// Builds a CCSDS XML OMM string from a slice of [`Sgp4`] structs.
+///
+/// Each element set is written as one `omm` record inside an `ndm` document.
+/// The `ndm` root includes the CCSDS NDM XML schema location used by
+/// Celestrak. Metadata fields that are not stored on
+/// [`GenPerturbElementSet`] are filled with SGP4 defaults: Earth-centered,
+/// TEME, UTC, and SGP4. CREATION_DATE and ORIGINATOR are left empty.
+/// OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
+/// (the stored derivatives divided by 2 and 6).
+///
+/// An empty slice produces an `ndm` document with no `omm` records.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+///
+/// # Returns
+/// * `String` - An NDM XML document containing one or more OMM records
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_omm_xml_string, to_omm_xml_string};
+///
+/// // Define the OMM XML string
+/// let omm = r#"<ndm>
+/// <omm id="CCSDS_OMM_VERS" version="2.0">
+/// <body><segment>
+/// <metadata>
+/// <OBJECT_NAME>2026-106A</OBJECT_NAME>
+/// <OBJECT_ID>2026-106A</OBJECT_ID>
+/// </metadata>
+/// <data><meanElements>
+/// <EPOCH>2026-06-14T15:07:48.259488</EPOCH>
+/// <MEAN_MOTION>15.11169557</MEAN_MOTION>
+/// <ECCENTRICITY>.00147468</ECCENTRICITY>
+/// <INCLINATION>97.5103</INCLINATION>
+/// <RA_OF_ASC_NODE>247.7605</RA_OF_ASC_NODE>
+/// <ARG_OF_PERICENTER>169.6213</ARG_OF_PERICENTER>
+/// <MEAN_ANOMALY>190.5325</MEAN_ANOMALY>
+/// </meanElements><tleParameters>
+/// <EPHEMERIS_TYPE>0</EPHEMERIS_TYPE>
+/// <CLASSIFICATION_TYPE>U</CLASSIFICATION_TYPE>
+/// <NORAD_CAT_ID>69097</NORAD_CAT_ID>
+/// <ELEMENT_SET_NO>999</ELEMENT_SET_NO>
+/// <REV_AT_EPOCH>459</REV_AT_EPOCH>
+/// <BSTAR>.39221734E-3</BSTAR>
+/// <MEAN_MOTION_DOT>.6535E-4</MEAN_MOTION_DOT>
+/// <MEAN_MOTION_DDOT>0</MEAN_MOTION_DDOT>
+/// </tleParameters></data>
+/// </segment></body></omm></ndm>"#;
+///
+/// // Export the parsed element sets back to XML
+/// let sgp4s = from_omm_xml_string(omm);
+/// let exported = to_omm_xml_string(&sgp4s);
+/// let reparsed = from_omm_xml_string(&exported);
+///
+/// // Assert the round-trip catalog number is unchanged
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// ```
+///
+/// # References
+/// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
+/// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
+    // Wrap all records in an NDM document with the CCSDS schema location
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <ndm xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" \
+         xsi:noNamespaceSchemaLocation=\"https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd\">\n",
+    );
+    for sgp4 in sgp4s {
+        xml.push_str(&gp_to_omm_xml(&sgp4.gp));
+    }
+    xml.push_str("</ndm>\n");
+
+    return xml;
+}
+
+/// Writes a CCSDS XML OMM file from a slice of [`Sgp4`] structs.
+///
+/// This function serializes the provided element sets with
+/// [`to_omm_xml_string`] and writes the result to `omm_xml_file_path`.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+/// * `omm_xml_file_path` - Destination path for the XML file
+///
+/// # Panics
+/// * If the file cannot be written
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_omm_xml_file, to_omm_xml_file};
+///
+/// // Parse the OMM XML test file
+/// let sgp4s = from_omm_xml_file("test/omm_parsing_cases.xml");
+///
+/// // Write the element sets to test/export
+/// std::fs::create_dir_all("test/export").expect("could not create test/export");
+/// let out_path = "test/export/omm_xml.xml";
+/// to_omm_xml_file(&sgp4s, out_path);
+///
+/// // Parse the written file and assert the catalog number
+/// let reparsed = from_omm_xml_file(out_path);
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// ```
+///
+/// # References
+/// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
+/// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+pub fn to_omm_xml_file(sgp4s: &[Sgp4], omm_xml_file_path: &str) {
+    // Serialize the element sets and write the XML file
+    let omm_xml_string = to_omm_xml_string(sgp4s);
+    fs::write(omm_xml_file_path, omm_xml_string).expect("Cannot write OMM XML file");
 }
 
 /// Build an [`Sgp4`] struct from one JSON OMM object
@@ -1237,6 +1861,7 @@ fn sgp4_from_json_record(record: &Value) -> Sgp4 {
 ///
 /// # References
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_json_string(omm_json_string: &str) -> Vec<Sgp4> {
     // Parse the JSON document
@@ -1336,6 +1961,7 @@ fn json_omm_fields(record: &Value) -> HashMap<String, String> {
 ///
 /// # References
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_json_file(omm_json_file_path: &str) -> Vec<Sgp4> {
     // Open the OMM JSON file
@@ -1347,6 +1973,221 @@ pub fn from_omm_json_file(omm_json_file_path: &str) -> Vec<Sgp4> {
 
     // Return the vector of SGP4 structs
     return sgp4s;
+}
+
+/// Format an OMM number as a JSON numeric literal
+///
+/// JSON requires a digit before the decimal point, so this does not use
+/// Celestrak KVN scientific notation or a leading-dot fraction. Zero is
+/// written as `0`.
+///
+/// # Arguments
+/// * `value` - The number to format
+///
+/// # Returns
+/// * A JSON number literal
+fn format_omm_json_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+
+    let rounded = (value * 1e12).round() / 1e12;
+    match serde_json::Number::from_f64(rounded) {
+        Some(n) => n.to_string(),
+        None => "0".to_string(),
+    }
+}
+
+/// Build one OMM JSON object from a general perturbation element set
+///
+/// Field names and types match Celestrak GP JSON: strings for names, epoch,
+/// and classification; numbers for the remaining GP fields. MEAN_MOTION_DOT
+/// and MEAN_MOTION_DDOT are the TLE-printed values (stored derivatives
+/// divided by 2 and 6).
+///
+/// # Arguments
+/// * `gp` - The element set to serialize
+///
+/// # Returns
+/// * One pretty-printed JSON object
+fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
+    // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
+    let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
+    let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
+
+    let fields = [
+        format!(
+            "        \"OBJECT_NAME\": {}",
+            serde_json::to_string(&gp.common_name).unwrap()
+        ),
+        format!(
+            "        \"OBJECT_ID\": {}",
+            serde_json::to_string(&gp.international_designator).unwrap()
+        ),
+        format!(
+            "        \"EPOCH\": {}",
+            serde_json::to_string(&format_omm_epoch(&gp.epoch_datetime)).unwrap()
+        ),
+        format!(
+            "        \"MEAN_MOTION\": {}",
+            format_omm_json_number(gp.mean_motion)
+        ),
+        format!(
+            "        \"ECCENTRICITY\": {}",
+            format_omm_json_number(gp.eccentricity)
+        ),
+        format!(
+            "        \"INCLINATION\": {}",
+            format_omm_json_number(gp.inclination)
+        ),
+        format!(
+            "        \"RA_OF_ASC_NODE\": {}",
+            format_omm_json_number(gp.right_ascension_of_ascending_node)
+        ),
+        format!(
+            "        \"ARG_OF_PERICENTER\": {}",
+            format_omm_json_number(gp.argument_of_perigee)
+        ),
+        format!(
+            "        \"MEAN_ANOMALY\": {}",
+            format_omm_json_number(gp.mean_anomaly)
+        ),
+        format!("        \"EPHEMERIS_TYPE\": {}", gp.ephemeris_type),
+        format!(
+            "        \"CLASSIFICATION_TYPE\": {}",
+            serde_json::to_string(&format_omm_classification(gp.classification)).unwrap()
+        ),
+        format!(
+            "        \"NORAD_CAT_ID\": {}",
+            gp.satellite_catalog_number
+        ),
+        format!("        \"ELEMENT_SET_NO\": {}", gp.element_set_number),
+        format!(
+            "        \"REV_AT_EPOCH\": {}",
+            gp.revolution_number_at_epoch
+        ),
+        format!("        \"BSTAR\": {}", format_omm_json_number(gp.bstar)),
+        format!(
+            "        \"MEAN_MOTION_DOT\": {}",
+            format_omm_json_number(mean_motion_dot)
+        ),
+        format!(
+            "        \"MEAN_MOTION_DDOT\": {}",
+            format_omm_json_number(mean_motion_ddot)
+        ),
+    ];
+
+    return format!("    {{\n{}\n    }}", fields.join(",\n"));
+}
+
+/// Builds a Celestrak-style JSON OMM string from a slice of [`Sgp4`] structs.
+///
+/// Each element set is written as one JSON object in a top-level array.
+/// Strings are used for OBJECT_NAME, OBJECT_ID, EPOCH, and
+/// CLASSIFICATION_TYPE. Numeric GP fields are JSON numbers.
+/// OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
+/// (the stored derivatives divided by 2 and 6).
+///
+/// An empty slice produces `[]`.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+///
+/// # Returns
+/// * `String` - A JSON array of OMM objects
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_omm_json_string, to_omm_json_string};
+///
+/// // Define the OMM JSON string
+/// let omm = r#"[
+/// {
+/// "OBJECT_NAME": "2026-106A",
+/// "OBJECT_ID": "2026-106A",
+/// "EPOCH": "2026-06-14T15:07:48.259488",
+/// "MEAN_MOTION": 15.11169557,
+/// "ECCENTRICITY": 0.00147468,
+/// "INCLINATION": 97.5103,
+/// "RA_OF_ASC_NODE": 247.7605,
+/// "ARG_OF_PERICENTER": 169.6213,
+/// "MEAN_ANOMALY": 190.5325,
+/// "EPHEMERIS_TYPE": 0,
+/// "CLASSIFICATION_TYPE": "U",
+/// "NORAD_CAT_ID": 69097,
+/// "ELEMENT_SET_NO": 999,
+/// "REV_AT_EPOCH": 459,
+/// "BSTAR": 0.00039221734,
+/// "MEAN_MOTION_DOT": 6.535e-05,
+/// "MEAN_MOTION_DDOT": 0
+/// }
+/// ]"#;
+///
+/// // Export the parsed element sets back to JSON
+/// let sgp4s = from_omm_json_string(omm);
+/// let exported = to_omm_json_string(&sgp4s);
+/// let reparsed = from_omm_json_string(&exported);
+///
+/// // Assert the round-trip catalog number is unchanged
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// ```
+///
+/// # References
+/// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
+/// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
+    // An empty slice is an empty JSON array
+    if sgp4s.is_empty() {
+        return "[]\n".to_string();
+    }
+
+    // Serialize each element set as one JSON object
+    let mut objects = Vec::new();
+    for sgp4 in sgp4s {
+        objects.push(gp_to_omm_json(&sgp4.gp));
+    }
+
+    return format!("[\n{}\n]\n", objects.join(",\n"));
+}
+
+/// Writes a Celestrak-style JSON OMM file from a slice of [`Sgp4`] structs.
+///
+/// This function serializes the provided element sets with
+/// [`to_omm_json_string`] and writes the result to `omm_json_file_path`.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+/// * `omm_json_file_path` - Destination path for the JSON file
+///
+/// # Panics
+/// * If the file cannot be written
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_omm_json_file, to_omm_json_file};
+///
+/// // Parse the OMM JSON test file
+/// let sgp4s = from_omm_json_file("test/omm_parsing_cases.json");
+///
+/// // Write the element sets to test/export
+/// std::fs::create_dir_all("test/export").expect("could not create test/export");
+/// let out_path = "test/export/omm_json.json";
+/// to_omm_json_file(&sgp4s, out_path);
+///
+/// // Parse the written file and assert the catalog number
+/// let reparsed = from_omm_json_file(out_path);
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// ```
+///
+/// # References
+/// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
+/// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+pub fn to_omm_json_file(sgp4s: &[Sgp4], omm_json_file_path: &str) {
+    // Serialize the element sets and write the JSON file
+    let omm_json_string = to_omm_json_string(sgp4s);
+    fs::write(omm_json_file_path, omm_json_string).expect("Cannot write OMM JSON file");
 }
 
 /// Build an [`Sgp4`] struct from one CSV OMM row
@@ -1403,6 +2244,7 @@ fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Sgp4 
 ///
 /// # References
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_csv_string(omm_csv_string: &str) -> Vec<Sgp4> {
     // Parse the CSV document, using the first row as OMM keywords
@@ -1492,6 +2334,7 @@ fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<Str
 ///
 /// # References
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Vec<Sgp4> {
     // Open the OMM CSV file
@@ -1503,6 +2346,159 @@ pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Vec<Sgp4> {
 
     // Return the vector of SGP4 structs
     return sgp4s;
+}
+
+/// Celestrak GP CSV column order
+const OMM_CSV_HEADERS: [&str; 17] = [
+    "OBJECT_NAME",
+    "OBJECT_ID",
+    "EPOCH",
+    "MEAN_MOTION",
+    "ECCENTRICITY",
+    "INCLINATION",
+    "RA_OF_ASC_NODE",
+    "ARG_OF_PERICENTER",
+    "MEAN_ANOMALY",
+    "EPHEMERIS_TYPE",
+    "CLASSIFICATION_TYPE",
+    "NORAD_CAT_ID",
+    "ELEMENT_SET_NO",
+    "REV_AT_EPOCH",
+    "BSTAR",
+    "MEAN_MOTION_DOT",
+    "MEAN_MOTION_DDOT",
+];
+
+/// Build one OMM CSV data row from a general perturbation element set
+///
+/// MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values (stored
+/// derivatives divided by 2 and 6). BSTAR and the mean-motion derivatives
+/// use Celestrak scientific notation.
+///
+/// # Arguments
+/// * `gp` - The element set to serialize
+///
+/// # Returns
+/// * One CSV data row, in [`OMM_CSV_HEADERS`] order
+fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
+    // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
+    let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
+    let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
+
+    return [
+        gp.common_name.clone(),
+        gp.international_designator.clone(),
+        format_omm_epoch(&gp.epoch_datetime),
+        format_omm_decimal(gp.mean_motion),
+        format_omm_decimal(gp.eccentricity),
+        format_omm_decimal(gp.inclination),
+        format_omm_decimal(gp.right_ascension_of_ascending_node),
+        format_omm_decimal(gp.argument_of_perigee),
+        format_omm_decimal(gp.mean_anomaly),
+        gp.ephemeris_type.to_string(),
+        format_omm_classification(gp.classification),
+        gp.satellite_catalog_number.to_string(),
+        gp.element_set_number.to_string(),
+        gp.revolution_number_at_epoch.to_string(),
+        format_omm_sci(gp.bstar),
+        format_omm_sci(mean_motion_dot),
+        format_omm_sci(mean_motion_ddot),
+    ];
+}
+
+/// Builds a Celestrak-style CSV OMM string from a slice of [`Sgp4`] structs.
+///
+/// The first row is the OMM keyword header. Each following row is one
+/// element set. MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed
+/// values (the stored derivatives divided by 2 and 6).
+///
+/// An empty slice produces a header-only CSV.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+///
+/// # Returns
+/// * `String` - A CSV document with a header row and one row per record
+///
+/// # Panics
+/// * If the CSV document cannot be written
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_omm_csv_string, to_omm_csv_string};
+///
+/// // Define the OMM CSV string
+/// let omm = "\
+/// OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT
+/// 2026-106A,2026-106A,2026-06-14T15:07:48.259488,15.11169557,.00147468,97.5103,247.7605,169.6213,190.5325,0,U,69097,999,459,.39221734E-3,.6535E-4,0
+/// ";
+///
+/// // Export the parsed element sets back to CSV
+/// let sgp4s = from_omm_csv_string(omm);
+/// let exported = to_omm_csv_string(&sgp4s);
+/// let reparsed = from_omm_csv_string(&exported);
+///
+/// // Assert the round-trip catalog number is unchanged
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// ```
+///
+/// # References
+/// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
+/// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
+    // Write the header row, then one data row per element set
+    let mut writer = WriterBuilder::new().from_writer(Vec::new());
+    writer
+        .write_record(OMM_CSV_HEADERS)
+        .expect("Cannot write OMM CSV");
+    for sgp4 in sgp4s {
+        writer
+            .write_record(&gp_to_omm_csv_row(&sgp4.gp))
+            .expect("Cannot write OMM CSV");
+    }
+
+    let bytes = writer.into_inner().expect("Cannot write OMM CSV");
+    return String::from_utf8(bytes).expect("Cannot write OMM CSV");
+}
+
+/// Writes a Celestrak-style CSV OMM file from a slice of [`Sgp4`] structs.
+///
+/// This function serializes the provided element sets with
+/// [`to_omm_csv_string`] and writes the result to `omm_csv_file_path`.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+/// * `omm_csv_file_path` - Destination path for the CSV file
+///
+/// # Panics
+/// * If the file cannot be written
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_omm_csv_file, to_omm_csv_file};
+///
+/// // Parse the OMM CSV test file
+/// let sgp4s = from_omm_csv_file("test/omm_parsing_cases.csv");
+///
+/// // Write the element sets to test/export
+/// std::fs::create_dir_all("test/export").expect("could not create test/export");
+/// let out_path = "test/export/omm_csv.csv";
+/// to_omm_csv_file(&sgp4s, out_path);
+///
+/// // Parse the written file and assert the catalog number
+/// let reparsed = from_omm_csv_file(out_path);
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// ```
+///
+/// # References
+/// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
+/// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
+/// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+pub fn to_omm_csv_file(sgp4s: &[Sgp4], omm_csv_file_path: &str) {
+    // Serialize the element sets and write the CSV file
+    let omm_csv_string = to_omm_csv_string(sgp4s);
+    fs::write(omm_csv_file_path, omm_csv_string).expect("Cannot write OMM CSV file");
 }
 
 /// Parse an OMM EPOCH string into a UTC DateTime
@@ -2036,6 +3032,262 @@ mod tests {
                     )
                 });
             assert_gp_matches(key, &case.name, "from_omm_csv_file", &csv_match.gp, case);
+        }
+    }
+
+    fn assert_gp_eq(label: &str, original: &GenPerturbElementSet, exported: &GenPerturbElementSet) {
+        assert_eq!(
+            original.common_name, exported.common_name,
+            "{label}: common_name"
+        );
+        assert_eq!(
+            original.satellite_catalog_number, exported.satellite_catalog_number,
+            "{label}: satellite_catalog_number"
+        );
+        assert_eq!(
+            original.classification, exported.classification,
+            "{label}: classification"
+        );
+        assert_eq!(
+            original.international_designator, exported.international_designator,
+            "{label}: international_designator"
+        );
+        assert_eq!(
+            original.epoch_datetime.year, exported.epoch_datetime.year,
+            "{label}: epoch year"
+        );
+        assert_eq!(
+            original.epoch_datetime.month, exported.epoch_datetime.month,
+            "{label}: epoch month"
+        );
+        assert_eq!(
+            original.epoch_datetime.day, exported.epoch_datetime.day,
+            "{label}: epoch day"
+        );
+        assert_eq!(
+            original.epoch_datetime.hour, exported.epoch_datetime.hour,
+            "{label}: epoch hour"
+        );
+        assert_eq!(
+            original.epoch_datetime.minute, exported.epoch_datetime.minute,
+            "{label}: epoch minute"
+        );
+        assert!(
+            (original.epoch_datetime.second - exported.epoch_datetime.second).abs() < TLE_PARSE_TOL,
+            "{label}: epoch second {} vs {}",
+            original.epoch_datetime.second,
+            exported.epoch_datetime.second
+        );
+        assert!(
+            (original.first_derivative_of_mean_motion - exported.first_derivative_of_mean_motion)
+                .abs()
+                < TLE_PARSE_TOL,
+            "{label}: n-dot"
+        );
+        assert!(
+            (original.second_derivative_of_mean_motion - exported.second_derivative_of_mean_motion)
+                .abs()
+                < TLE_PARSE_TOL,
+            "{label}: n-ddot"
+        );
+        assert!(
+            (original.bstar - exported.bstar).abs() < TLE_PARSE_TOL,
+            "{label}: bstar"
+        );
+        assert_eq!(
+            original.ephemeris_type, exported.ephemeris_type,
+            "{label}: ephemeris_type"
+        );
+        assert_eq!(
+            original.element_set_number, exported.element_set_number,
+            "{label}: element_set_number"
+        );
+        assert!(
+            (original.inclination - exported.inclination).abs() < TLE_PARSE_TOL,
+            "{label}: inclination"
+        );
+        assert!(
+            (original.right_ascension_of_ascending_node
+                - exported.right_ascension_of_ascending_node)
+                .abs()
+                < TLE_PARSE_TOL,
+            "{label}: raan"
+        );
+        assert!(
+            (original.eccentricity - exported.eccentricity).abs() < TLE_PARSE_TOL,
+            "{label}: eccentricity"
+        );
+        assert!(
+            (original.argument_of_perigee - exported.argument_of_perigee).abs() < TLE_PARSE_TOL,
+            "{label}: argp"
+        );
+        assert!(
+            (original.mean_anomaly - exported.mean_anomaly).abs() < TLE_PARSE_TOL,
+            "{label}: mean anomaly"
+        );
+        assert!(
+            (original.mean_motion - exported.mean_motion).abs() < TLE_PARSE_TOL,
+            "{label}: mean motion"
+        );
+        assert_eq!(
+            original.revolution_number_at_epoch, exported.revolution_number_at_epoch,
+            "{label}: revolution_number_at_epoch"
+        );
+    }
+
+    fn export_test_path(file_name: &str) -> String {
+        let dir = std::path::Path::new("test/export");
+        std::fs::create_dir_all(dir).expect("could not create test/export");
+        dir.join(file_name)
+            .to_str()
+            .expect("export path is valid UTF-8")
+            .to_string()
+    }
+
+    #[test]
+    fn test_omm_kvn_export_empty() {
+        // An empty slice should produce an empty KVN string
+        let exported = to_omm_kvn_string(&[]);
+        assert_eq!(exported, "");
+    }
+
+    #[test]
+    fn test_omm_kvn_export_string_roundtrip() {
+        // Parse the KVN test file, export, and parse the export
+        let original = from_omm_kvn_file("test/omm_parsing_cases.txt");
+        let exported = to_omm_kvn_string(&original);
+        let reparsed = from_omm_kvn_string(&exported);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_omm_kvn_export_file_roundtrip() {
+        // Parse the KVN test file and write it back out
+        let original = from_omm_kvn_file("test/omm_parsing_cases.txt");
+        let out_path = export_test_path("omm_kvn.txt");
+        to_omm_kvn_file(&original, &out_path);
+
+        // Parse the written file and compare GP fields
+        let reparsed = from_omm_kvn_file(&out_path);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_omm_xml_export_empty() {
+        // An empty slice should produce an NDM document with no OMM records
+        let exported = to_omm_xml_string(&[]);
+        let reparsed = from_omm_xml_string(&exported);
+        assert!(reparsed.is_empty());
+    }
+
+    #[test]
+    fn test_omm_xml_export_string_roundtrip() {
+        // Parse the XML test file, export, and parse the export
+        let original = from_omm_xml_file("test/omm_parsing_cases.xml");
+        let exported = to_omm_xml_string(&original);
+        let reparsed = from_omm_xml_string(&exported);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_omm_xml_export_file_roundtrip() {
+        // Parse the XML test file and write it back out
+        let original = from_omm_xml_file("test/omm_parsing_cases.xml");
+        let out_path = export_test_path("omm_xml.xml");
+        to_omm_xml_file(&original, &out_path);
+
+        // Parse the written file and compare GP fields
+        let reparsed = from_omm_xml_file(&out_path);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_omm_json_export_empty() {
+        // An empty slice should produce an empty JSON array
+        let exported = to_omm_json_string(&[]);
+        let reparsed = from_omm_json_string(&exported);
+        assert!(reparsed.is_empty());
+    }
+
+    #[test]
+    fn test_omm_json_export_string_roundtrip() {
+        // Parse the JSON test file, export, and parse the export
+        let original = from_omm_json_file("test/omm_parsing_cases.json");
+        let exported = to_omm_json_string(&original);
+        let reparsed = from_omm_json_string(&exported);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_omm_json_export_file_roundtrip() {
+        // Parse the JSON test file and write it back out
+        let original = from_omm_json_file("test/omm_parsing_cases.json");
+        let out_path = export_test_path("omm_json.json");
+        to_omm_json_file(&original, &out_path);
+
+        // Parse the written file and compare GP fields
+        let reparsed = from_omm_json_file(&out_path);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_omm_csv_export_empty() {
+        // An empty slice should produce a header-only CSV
+        let exported = to_omm_csv_string(&[]);
+        let reparsed = from_omm_csv_string(&exported);
+        assert!(reparsed.is_empty());
+    }
+
+    #[test]
+    fn test_omm_csv_export_string_roundtrip() {
+        // Parse the CSV test file, export, and parse the export
+        let original = from_omm_csv_file("test/omm_parsing_cases.csv");
+        let exported = to_omm_csv_string(&original);
+        let reparsed = from_omm_csv_string(&exported);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_omm_csv_export_file_roundtrip() {
+        // Parse the CSV test file and write it back out
+        let original = from_omm_csv_file("test/omm_parsing_cases.csv");
+        let out_path = export_test_path("omm_csv.csv");
+        to_omm_csv_file(&original, &out_path);
+
+        // Parse the written file and compare GP fields
+        let reparsed = from_omm_csv_file(&out_path);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
         }
     }
 

@@ -15,11 +15,19 @@ In progress
 In progress
 
 ## Plan / TODOs
-- Export as TLE and OMM
+- Export as TLE
 - Package as a crate
-- Write math spec (Jupyter notebook?)
-- Python wrapper
+    - Add a license
+    - Add manifest
+    - Add CI in github
+    - Straighten out README
+    - Return error instead of panic
+    - Hide internal functions from API
+    - Add examples to docs
+    - Make XML, JSON, and CSV optional (external crates)
 - Fit state data to a TLE
+- Write math spec
+- Python wrapper
 - Conjunction screening
 
 ## Testing and Documentation
