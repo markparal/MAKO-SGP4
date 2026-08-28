@@ -15,7 +15,6 @@ In progress
 In progress
 
 ## Plan / TODOs
-- Export as TLE
 - Package as a crate
     - Add a license
     - Add manifest
@@ -25,7 +24,7 @@ In progress
     - Hide internal functions from API
     - Add examples to docs
     - Make XML, JSON, and CSV optional (external crates)
-- Fit state data to a TLE
+- Fit state data to GP
 - Write math spec
 - Python wrapper
 - Conjunction screening

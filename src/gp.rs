@@ -1,6 +1,7 @@
 //! Module to handle the input and processing of GP (General Perturbation)
 //! elements. Element sets can be parsed from TLE (including Alpha-5 catalog
-//! numbers) and OMM formats, and written back to OMM KVN, XML, JSON, and CSV.
+//! numbers) and OMM formats, and written back to TLE and OMM KVN, XML, JSON,
+//! and CSV.
 
 // ------------------
 // External Libraries
@@ -628,6 +629,487 @@ pub fn alpha5_digit(c: char) -> Option<i32> {
         'P'..='Z' => Some((c_upper as i32) - ('P' as i32) + 23),
         _ => None, // Standard skips 'I' and 'O'
     }
+}
+
+/// Converts an integer to an Alpha-5 digit
+///
+/// Inverse of [`alpha5_digit`]. Integers 10-17 map to A-H, 18-22 to J-N,
+/// and 23-33 to P-Z. The letters I and O are skipped.
+///
+/// # Arguments
+/// * `digit` - The integer value to convert
+///
+/// # Returns
+/// * `Some(c)` - The Alpha-5 character
+/// * `None` - If the integer is outside 10-33 or would map to I or O
+///
+/// # References
+/// - [Alpha-5 Standard](https://www.space-track.org/documentation#tle-alpha5)
+fn alpha5_letter(digit: i32) -> Option<char> {
+    // Match the integer to the corresponding Alpha-5 character
+    match digit {
+        10..=17 => Some((b'A' + (digit as u8 - 10)) as char),
+        18..=22 => Some((b'J' + (digit as u8 - 18)) as char),
+        23..=33 => Some((b'P' + (digit as u8 - 23)) as char),
+        _ => None, // Standard skips 'I' and 'O'
+    }
+}
+
+/// Format a NORAD catalog number for a TLE
+///
+/// Numbers below 100000 are written as a 5-character right-justified
+/// field. Numbers 100000-339999 use Alpha-5 encoding.
+///
+/// # Arguments
+/// * `catalog` - The NORAD catalog number
+///
+/// # Returns
+/// * A 5-character catalog field
+///
+/// # Panics
+/// * If the catalog number is negative or greater than 339999
+///
+/// # References
+/// - [Alpha-5 Standard](https://www.space-track.org/documentation#tle-alpha5)
+fn format_tle_catalog_number(catalog: i32) -> String {
+    // Reject negative catalog numbers
+    if catalog < 0 {
+        panic!(
+            "TLE catalog number is invalid: must be non-negative, got {}",
+            catalog
+        );
+    }
+
+    if catalog < 100000 {
+        // This is a classic numeric catalog number
+        return format!("{:>5}", catalog);
+    }
+
+    // This is an Alpha-5 catalog number
+    let first = catalog / 10000;
+    let rest = catalog % 10000;
+    let Some(letter) = alpha5_letter(first) else {
+        panic!(
+            "TLE catalog number is invalid: {} is outside the Alpha-5 range",
+            catalog
+        );
+    };
+    return format!("{}{:04}", letter, rest);
+}
+
+/// Format an international designator for a TLE
+///
+/// Converts YYYY-NNNP form back to the 8-character TLE field YYNNNPPP.
+/// Missing designators are written as eight spaces.
+///
+/// # Arguments
+/// * `intl` - The international designator stored on the GP
+///
+/// # Returns
+/// * An 8-character international designator field
+fn format_tle_intl_des(intl: &str) -> String {
+    let intl = intl.trim();
+    if intl.is_empty() {
+        // Handle case where international designator is not present
+        return "        ".to_string();
+    }
+
+    // Collapse YYYY-NNNP back to the two-digit TLE year plus the launch piece
+    let mut field = if let Some((year_str, rest)) = intl.split_once('-') {
+        let year = year_str.parse::<i32>().unwrap_or(0);
+        let yy = ((year % 100) + 100) % 100;
+        format!("{:02}{}", yy, rest)
+    } else {
+        intl.to_string()
+    };
+
+    // TLE international designator field is 8 characters, left-justified
+    if field.len() > 8 {
+        field.truncate(8);
+    }
+    return format!("{:<8}", field);
+}
+
+/// Format a TLE epoch from a UTC datetime
+///
+/// Writes YYDDD.DDDDDDDD: two-digit year and day of year with eight
+/// fractional digits.
+///
+/// # Arguments
+/// * `epoch` - The epoch datetime
+///
+/// # Returns
+/// * A 14-character TLE epoch field
+fn format_tle_epoch(epoch: &DateTime) -> String {
+    // TLE years are stored modulo 100
+    let two_digit_year = ((epoch.year % 100) + 100) % 100;
+
+    // Check for leap year
+    let is_leap = (epoch.year % 4 == 0 && epoch.year % 100 != 0) || (epoch.year % 400 == 0);
+
+    // Days per month (non-leap year)
+    let days_per_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+    // Sum complete months to get the integer day of year
+    let mut day_int = epoch.day;
+    for m in 1..epoch.month {
+        let days_this_month = if m == 2 && is_leap {
+            29 // February in leap year
+        } else {
+            days_per_month[(m - 1) as usize]
+        };
+        day_int += days_this_month;
+    }
+
+    // Convert clock time to a fractional day
+    let mut second = epoch.second;
+    if second < 0.0 {
+        second = 0.0;
+    }
+    let day_frac =
+        (epoch.hour as f64 * 3600.0 + epoch.minute as f64 * 60.0 + second) / 86400.0;
+    let dayofyr = day_int as f64 + day_frac;
+
+    return format!("{:02}{:012.8}", two_digit_year, dayofyr);
+}
+
+/// Format the TLE-printed first derivative of mean motion
+///
+/// Writes the 10-character field as a signed decimal without a leading
+/// zero, for example `-.00002182` or ` .00000234`.
+///
+/// # Arguments
+/// * `value` - The TLE-printed first derivative (stored value divided by 2) \[revs/day^2\]
+///
+/// # Returns
+/// * A 10-character mean-motion-dot field
+fn format_tle_ndot(value: f64) -> String {
+    // Eight digits after the implied 0. prefix
+    let mut digits = (value.abs() * 1e8).round() as i64;
+    if digits > 99999999 {
+        digits = 99999999;
+    }
+
+    // Negative values use '-', positive values use a leading space
+    if value < 0.0 && digits != 0 {
+        return format!("-.{:08}", digits);
+    }
+    return format!(" .{:08}", digits);
+}
+
+/// Format a TLE exponential field (second derivative of mean motion or BSTAR)
+///
+/// Writes the 8-character assumed-decimal form, for example `-11606-4`
+/// meaning -0.11606 times 10 to the -4. Zero is written as ` 00000+0`.
+///
+/// # Arguments
+/// * `value` - The TLE-printed value
+///
+/// # Returns
+/// * An 8-character TLE exponential field
+fn format_tle_exp(value: f64) -> String {
+    if !value.is_finite() || value == 0.0 {
+        return " 00000+0".to_string();
+    }
+
+    let sign = if value < 0.0 { '-' } else { ' ' };
+    let abs = value.abs();
+
+    // Mantissa in [0.1, 1) so the five digits sit after an implied decimal
+    let mut exp = abs.log10().floor() as i32 + 1;
+    let mantissa = abs / 10f64.powi(exp);
+    let mut digits = (mantissa * 100000.0).round() as i32;
+
+    if digits >= 100000 {
+        digits = 10000;
+        exp += 1;
+    }
+    if digits == 0 {
+        return " 00000+0".to_string();
+    }
+
+    // TLE exponent is a single digit
+    if exp > 9 {
+        exp = 9;
+        digits = 99999;
+    } else if exp < -9 {
+        return " 00000+0".to_string();
+    }
+
+    let exp_sign = if exp >= 0 { '+' } else { '-' };
+    return format!("{}{:05}{}{}", sign, digits, exp_sign, exp.abs());
+}
+
+/// Format eccentricity for a TLE
+///
+/// Writes seven digits with the decimal point assumed. For example,
+/// 0.0006703 becomes `0006703`.
+///
+/// # Arguments
+/// * `eccentricity` - Orbital eccentricity
+///
+/// # Returns
+/// * A 7-character eccentricity field
+fn format_tle_eccentricity(eccentricity: f64) -> String {
+    // Seven digits after the implied 0. prefix
+    let mut digits = (eccentricity.abs() * 1e7).round() as i64;
+    if digits < 0 {
+        digits = 0;
+    }
+    if digits > 9999999 {
+        digits = 9999999;
+    }
+    return format!("{:07}", digits);
+}
+
+/// Append a TLE checksum digit to a 68-character line
+///
+/// Computes the checksum of the first 68 characters with [`calc_checksum`]
+/// and appends it so the returned line is 69 characters.
+///
+/// # Arguments
+/// * `line68` - The first 68 characters of a TLE data line
+///
+/// # Returns
+/// * A 69-character TLE line including checksum
+///
+/// # Panics
+/// * If `line68` is not exactly 68 characters
+fn tle_line_with_checksum(line68: &str) -> String {
+    if line68.len() != 68 {
+        panic!(
+            "TLE line is invalid: must be 68 characters before checksum, got {}",
+            line68.len()
+        );
+    }
+
+    // Append checksum as the 69th character
+    return format!("{}{}", line68, calc_checksum(line68));
+}
+
+/// Build TLE line 1 from a general perturbation element set
+///
+/// MEAN_MOTION_DOT and MEAN_MOTION_DDOT are written as the TLE-printed
+/// values (stored derivatives divided by 2 and 6).
+///
+/// # Arguments
+/// * `gp` - The element set to serialize
+///
+/// # Returns
+/// * TLE line 1, including checksum
+fn format_tle_line1(gp: &GenPerturbElementSet) -> String {
+    // Line 1
+    // Satellite catalog number
+    let catalog = format_tle_catalog_number(gp.satellite_catalog_number);
+
+    // Classification
+    let classification = if gp.classification.is_ascii_graphic() {
+        gp.classification
+    } else {
+        'U'
+    };
+
+    // International designator
+    let intl_des = format_tle_intl_des(&gp.international_designator);
+
+    // Epoch year and day of year
+    let epoch = format_tle_epoch(&gp.epoch_datetime);
+
+    // 1st derivative of mean motion (TLE prints the stored value divided by 2)
+    let ndot = format_tle_ndot(gp.first_derivative_of_mean_motion / 2.0);
+
+    // 2nd derivative of mean motion (TLE prints the stored value divided by 6)
+    let nddot = format_tle_exp(gp.second_derivative_of_mean_motion / 6.0);
+
+    // BSTAR drag term
+    let bstar = format_tle_exp(gp.bstar);
+
+    // Ephemeris type
+    let ephem_type = if (0..=9).contains(&gp.ephemeris_type) {
+        gp.ephemeris_type
+    } else {
+        0
+    };
+
+    // Element set number (4 digits)
+    let elset = gp.element_set_number.rem_euclid(10000);
+
+    let line68 = format!(
+        "1 {}{} {} {} {} {} {} {} {:>4}",
+        catalog, classification, intl_des, epoch, ndot, nddot, bstar, ephem_type, elset
+    );
+    return tle_line_with_checksum(&line68);
+}
+
+/// Build TLE line 2 from a general perturbation element set
+///
+/// Writes inclination, RAAN, eccentricity, argument of perigee, mean
+/// anomaly, mean motion, and revolution number in TLE column layout.
+///
+/// # Arguments
+/// * `gp` - The element set to serialize
+///
+/// # Returns
+/// * TLE line 2, including checksum
+fn format_tle_line2(gp: &GenPerturbElementSet) -> String {
+    // Line 2
+    // Satellite catalog number
+    let catalog = format_tle_catalog_number(gp.satellite_catalog_number);
+
+    // Inclination [degs]
+    let inclination = format!("{:8.4}", gp.inclination);
+
+    // Right ascension of ascending node [degs]
+    let right_ascension_of_ascending_node =
+        format!("{:8.4}", gp.right_ascension_of_ascending_node);
+
+    // Eccentricity (decimal point assumed)
+    let ecc = format_tle_eccentricity(gp.eccentricity);
+
+    // Argument of perigee [degs]
+    let argument_of_perigee = format!("{:8.4}", gp.argument_of_perigee);
+
+    // Mean anomaly [degs]
+    let mean_anomaly = format!("{:8.4}", gp.mean_anomaly);
+
+    // Mean motion [revs/day]
+    let mean_motion = format!("{:11.8}", gp.mean_motion);
+
+    // Revolution number at epoch (5 digits)
+    let rev = format!("{:>5}", gp.revolution_number_at_epoch.rem_euclid(100000));
+
+    let line68 = format!(
+        "2 {} {} {} {} {} {} {}{}",
+        catalog,
+        inclination,
+        right_ascension_of_ascending_node,
+        ecc,
+        argument_of_perigee,
+        mean_anomaly,
+        mean_motion,
+        rev
+    );
+    return tle_line_with_checksum(&line68);
+}
+
+/// Build one TLE from a general perturbation element set
+///
+/// A name line (line 0) is written when [`GenPerturbElementSet::common_name`]
+/// is non-empty. Names longer than 24 characters are truncated. MEAN_MOTION
+/// derivatives are written as the TLE-printed values (stored derivatives
+/// divided by 2 and 6).
+///
+/// # Arguments
+/// * `gp` - The element set to serialize
+///
+/// # Returns
+/// * One TLE in 2-line or 3-line format, including a trailing newline
+fn gp_to_tle(gp: &GenPerturbElementSet) -> String {
+    let mut tle = String::new();
+
+    // Optional name line (TLE line 0)
+    let name = gp.common_name.trim();
+    if !name.is_empty() {
+        let mut name = name.to_string();
+        if name.len() > 24 {
+            name.truncate(24);
+        }
+        tle.push_str(&name);
+        tle.push('\n');
+    }
+
+    // TLE line 1 and line 2
+    tle.push_str(&format_tle_line1(gp));
+    tle.push('\n');
+    tle.push_str(&format_tle_line2(gp));
+    tle.push('\n');
+    return tle;
+}
+
+/// Builds a Two-Line Element (TLE) string from a slice of [`Sgp4`] structs.
+///
+/// Each element set is written as a 2-line TLE, or a 3-line TLE when a
+/// common name is present. Catalog numbers of 100000 and above use
+/// Alpha-5 encoding. MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the
+/// TLE-printed values (the stored derivatives divided by 2 and 6).
+///
+/// An empty slice produces an empty string.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+///
+/// # Returns
+/// * `String` - One or more TLEs
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_tle_string, to_tle_string};
+///
+/// // Define the TLE string
+/// let tle = "\
+/// ISS (ZARYA)
+/// 1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+/// 2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+/// ";
+///
+/// // Export the parsed element sets back to TLE
+/// let sgp4s = from_tle_string(tle);
+/// let exported = to_tle_string(&sgp4s);
+/// let reparsed = from_tle_string(&exported);
+///
+/// // Assert the round-trip catalog number is unchanged
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 25544);
+/// ```
+///
+/// # References
+/// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
+/// - [Alpha-5 Standard](https://www.space-track.org/documentation#tle-alpha5)
+pub fn to_tle_string(sgp4s: &[Sgp4]) -> String {
+    // Serialize each element set as one TLE
+    let mut records = String::new();
+    for sgp4 in sgp4s {
+        records.push_str(&gp_to_tle(&sgp4.gp));
+    }
+
+    return records;
+}
+
+/// Writes a Two-Line Element (TLE) file from a slice of [`Sgp4`] structs.
+///
+/// This function serializes the provided element sets with
+/// [`to_tle_string`] and writes the result to `tle_file_path`.
+///
+/// # Arguments
+/// * `sgp4s` - The SGP4 structs to export
+/// * `tle_file_path` - Destination path for the TLE file
+///
+/// # Panics
+/// * If the file cannot be written
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{from_tle_file, to_tle_file};
+///
+/// // Parse the TLE test file
+/// let sgp4s = from_tle_file("test/tle_parsing_cases.txt");
+///
+/// // Write the element sets to test/export
+/// std::fs::create_dir_all("test/export").expect("could not create test/export");
+/// let out_path = "test/export/tle.txt";
+/// to_tle_file(&sgp4s, out_path);
+///
+/// // Parse the written file and assert the catalog number
+/// let reparsed = from_tle_file(out_path);
+/// assert_eq!(reparsed[0].gp.satellite_catalog_number, 25544);
+/// ```
+///
+/// # References
+/// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
+/// - [Alpha-5 Standard](https://www.space-track.org/documentation#tle-alpha5)
+pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) {
+    // Serialize the element sets and write the TLE file
+    let tle_string = to_tle_string(sgp4s);
+    fs::write(tle_file_path, tle_string).expect("Cannot write TLE file");
 }
 
 /// Builds a [`Sgp4`] struct from the lines of a single OMM KVN record.
@@ -2599,6 +3081,15 @@ mod tests {
         assert_eq!(alpha5_digit('I'), None);
         assert_eq!(alpha5_digit('O'), None);
         assert_eq!(alpha5_digit('0'), None);
+
+        assert_eq!(alpha5_letter(10), Some('A'));
+        assert_eq!(alpha5_letter(17), Some('H'));
+        assert_eq!(alpha5_letter(18), Some('J'));
+        assert_eq!(alpha5_letter(22), Some('N'));
+        assert_eq!(alpha5_letter(23), Some('P'));
+        assert_eq!(alpha5_letter(33), Some('Z'));
+        assert_eq!(alpha5_letter(9), None);
+        assert_eq!(alpha5_letter(34), None);
     }
 
     #[test]
@@ -3288,6 +3779,58 @@ mod tests {
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
             assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_tle_export_empty() {
+        // An empty slice should produce an empty TLE string
+        let exported = to_tle_string(&[]);
+        assert_eq!(exported, "");
+    }
+
+    #[test]
+    fn test_tle_export_string_roundtrip() {
+        // Parse the TLE test file, export, and parse the export
+        let original = from_tle_file("test/tle_parsing_cases.txt");
+        let exported = to_tle_string(&original);
+        let reparsed = from_tle_string(&exported);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_tle_export_file_roundtrip() {
+        // Parse the TLE test file and write it back out
+        let original = from_tle_file("test/tle_parsing_cases.txt");
+        let out_path = export_test_path("tle.txt");
+        to_tle_file(&original, &out_path);
+
+        // Parse the written file and compare GP fields
+        let reparsed = from_tle_file(&out_path);
+
+        assert_eq!(original.len(), reparsed.len());
+        for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
+            assert_gp_eq(&format!("record {i}"), &a.gp, &b.gp);
+        }
+    }
+
+    #[test]
+    fn test_tle_export_line_format() {
+        // Exported data lines must be 69 characters and pass the checksum
+        let original = from_tle_file("test/tle_parsing_cases.txt");
+        let exported = to_tle_string(&original);
+
+        for line in exported.lines() {
+            if line.starts_with('1') || line.starts_with('2') {
+                assert_eq!(line.len(), 69, "TLE data line length: {line}");
+                assert!(tle_checksum(line), "TLE checksum: {line}");
+            } else {
+                assert!(!line.is_empty() && line.len() <= 24, "TLE name: {line}");
+            }
         }
     }
 
