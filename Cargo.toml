@@ -2,6 +2,23 @@
 name = "mako-sgp4"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = ""
+documentation = ""
+readme = "README.md"
+homepage = ""
+repository = "https://github.com/markparal/MAKO-SGP4"
+license = "MIT"
+license-file = "LICENSE"
+keywords = []
+categories = []
+include = [
+    "/src",
+    "/examples",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE*",
+]
 
 [lib]
 name = "mako_sgp4"
