@@ -6,12 +6,19 @@
 // ------------------
 // External Libraries
 // ------------------
-use std::collections::HashMap;
 use std::fs;
 
-use csv::{ReaderBuilder, WriterBuilder};
+#[cfg(any(feature = "xml", feature = "json", feature = "csv"))]
+use std::collections::HashMap;
+
+#[cfg(feature = "xml")]
 use roxmltree::{Document, Node};
+
+#[cfg(feature = "json")]
 use serde_json::Value;
+
+#[cfg(feature = "csv")]
+use csv::{ReaderBuilder, WriterBuilder};
 
 // ------------------
 // Internal Libraries
@@ -1859,6 +1866,7 @@ pub fn to_omm_kvn_file(sgp4s: &[Sgp4], omm_kvn_file_path: &str) {
 ///
 /// # Returns
 /// * A map of OMM keyword to text value
+#[cfg(feature = "xml")]
 fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
     let mut fields = HashMap::new();
 
@@ -1947,6 +1955,7 @@ fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "xml")]
 pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
     // Parse the XML document
     let doc = Document::parse(omm_xml_string).unwrap_or_else(|err| {
@@ -2008,6 +2017,7 @@ pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "xml")]
 pub fn from_omm_xml_file(omm_xml_file_path: &str) -> Vec<Sgp4> {
     // Open the OMM XML file
     let omm_xml_string = fs::read_to_string(omm_xml_file_path).expect("Cannot read OMM XML file");
@@ -2029,6 +2039,7 @@ pub fn from_omm_xml_file(omm_xml_file_path: &str) -> Vec<Sgp4> {
 ///
 /// # Returns
 /// * The escaped text
+#[cfg(feature = "xml")]
 fn escape_xml_text(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for c in value.chars() {
@@ -2054,6 +2065,7 @@ fn escape_xml_text(value: &str) -> String {
 ///
 /// # Returns
 /// * One XML element
+#[cfg(feature = "xml")]
 fn format_xml_tag(name: &str, value: &str) -> String {
     if value.is_empty() {
         format!("<{} />", name)
@@ -2075,6 +2087,7 @@ fn format_xml_tag(name: &str, value: &str) -> String {
 ///
 /// # Returns
 /// * One `omm` element, including a trailing newline
+#[cfg(feature = "xml")]
 fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
@@ -2216,6 +2229,7 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "xml")]
 pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
     // Wrap all records in an NDM document with the CCSDS schema location
     let mut xml = String::from(
@@ -2264,6 +2278,7 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "xml")]
 pub fn to_omm_xml_file(sgp4s: &[Sgp4], omm_xml_file_path: &str) {
     // Serialize the element sets and write the XML file
     let omm_xml_string = to_omm_xml_string(sgp4s);
@@ -2281,6 +2296,7 @@ pub fn to_omm_xml_file(sgp4s: &[Sgp4], omm_xml_file_path: &str) {
 /// # Panics
 /// * If the JSON value is not an object
 /// * If a present OMM field cannot be parsed
+#[cfg(feature = "json")]
 fn sgp4_from_json_record(record: &Value) -> Sgp4 {
     let fields = json_omm_fields(record);
     return sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned());
@@ -2345,6 +2361,7 @@ fn sgp4_from_json_record(record: &Value) -> Sgp4 {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "json")]
 pub fn from_omm_json_string(omm_json_string: &str) -> Vec<Sgp4> {
     // Parse the JSON document
     let value: Value = serde_json::from_str(omm_json_string).unwrap_or_else(|err| {
@@ -2383,6 +2400,7 @@ pub fn from_omm_json_string(omm_json_string: &str) -> Vec<Sgp4> {
 ///
 /// # Panics
 /// * If the JSON value is not an object
+#[cfg(feature = "json")]
 fn json_omm_fields(record: &Value) -> HashMap<String, String> {
     let Some(object) = record.as_object() else {
         panic!("OMM JSON record must be an object");
@@ -2445,6 +2463,7 @@ fn json_omm_fields(record: &Value) -> HashMap<String, String> {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "json")]
 pub fn from_omm_json_file(omm_json_file_path: &str) -> Vec<Sgp4> {
     // Open the OMM JSON file
     let omm_json_string = fs::read_to_string(omm_json_file_path)
@@ -2468,6 +2487,7 @@ pub fn from_omm_json_file(omm_json_file_path: &str) -> Vec<Sgp4> {
 ///
 /// # Returns
 /// * A JSON number literal
+#[cfg(feature = "json")]
 fn format_omm_json_number(value: f64) -> String {
     if value == 0.0 {
         return "0".to_string();
@@ -2492,6 +2512,7 @@ fn format_omm_json_number(value: f64) -> String {
 ///
 /// # Returns
 /// * One pretty-printed JSON object
+#[cfg(feature = "json")]
 fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
@@ -2618,6 +2639,7 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "json")]
 pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
     // An empty slice is an empty JSON array
     if sgp4s.is_empty() {
@@ -2666,6 +2688,7 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "json")]
 pub fn to_omm_json_file(sgp4s: &[Sgp4], omm_json_file_path: &str) {
     // Serialize the element sets and write the JSON file
     let omm_json_string = to_omm_json_string(sgp4s);
@@ -2683,6 +2706,7 @@ pub fn to_omm_json_file(sgp4s: &[Sgp4], omm_json_file_path: &str) {
 ///
 /// # Panics
 /// * If a present OMM field cannot be parsed
+#[cfg(feature = "csv")]
 fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Sgp4 {
     let fields = csv_omm_fields(headers, record);
     return sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned());
@@ -2728,6 +2752,7 @@ fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Sgp4 
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "csv")]
 pub fn from_omm_csv_string(omm_csv_string: &str) -> Vec<Sgp4> {
     // Parse the CSV document, using the first row as OMM keywords
     let mut reader = ReaderBuilder::new()
@@ -2767,6 +2792,7 @@ pub fn from_omm_csv_string(omm_csv_string: &str) -> Vec<Sgp4> {
 ///
 /// # Returns
 /// * A map of OMM keyword to text value
+#[cfg(feature = "csv")]
 fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<String, String> {
     let mut fields = HashMap::new();
 
@@ -2818,6 +2844,7 @@ fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<Str
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "csv")]
 pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Vec<Sgp4> {
     // Open the OMM CSV file
     let omm_csv_string = fs::read_to_string(omm_csv_file_path)
@@ -2831,6 +2858,7 @@ pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Vec<Sgp4> {
 }
 
 /// Celestrak GP CSV column order
+#[cfg(feature = "csv")]
 const OMM_CSV_HEADERS: [&str; 17] = [
     "OBJECT_NAME",
     "OBJECT_ID",
@@ -2862,6 +2890,7 @@ const OMM_CSV_HEADERS: [&str; 17] = [
 ///
 /// # Returns
 /// * One CSV data row, in [`OMM_CSV_HEADERS`] order
+#[cfg(feature = "csv")]
 fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
@@ -2928,6 +2957,7 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "csv")]
 pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
     // Write the header row, then one data row per element set
     let mut writer = WriterBuilder::new().from_writer(Vec::new());
@@ -2977,6 +3007,7 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "csv")]
 pub fn to_omm_csv_file(sgp4s: &[Sgp4], omm_csv_file_path: &str) {
     // Serialize the element sets and write the CSV file
     let omm_csv_string = to_omm_csv_string(sgp4s);
@@ -3398,6 +3429,51 @@ mod tests {
         }
     }
 
+    fn load_omm_parsing_cases() -> ParsingCases {
+        let content = std::fs::read_to_string("test/omm_parsing_cases.toml")
+            .expect("could not read test/omm_parsing_cases.toml");
+        from_str(&content).expect("could not parse test/omm_parsing_cases.toml")
+    }
+
+    fn sorted_omm_keys(cases: &ParsingCases) -> Vec<&String> {
+        let mut keys: Vec<&String> = cases.test.keys().collect();
+        keys.sort();
+        keys
+    }
+
+    #[cfg(any(feature = "xml", feature = "json", feature = "csv"))]
+    fn assert_omm_file_matches_cases(
+        cases: &ParsingCases,
+        from_file: &[Sgp4],
+        source: &str,
+        fixture: &str,
+    ) {
+        let expected_file_count = cases.test.values().filter(|c| !c.exception).count();
+        assert_eq!(
+            from_file.len(),
+            expected_file_count,
+            "{fixture} should contain one entry per non-error TOML case"
+        );
+
+        for key in sorted_omm_keys(cases) {
+            let case = &cases.test[key];
+            if case.exception {
+                continue;
+            }
+
+            let file_match = from_file
+                .iter()
+                .find(|s| s.gp.satellite_catalog_number == case.satellite_catalog_number)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "case {key} ({}): catalog {} missing from {fixture} parse",
+                        case.name, case.satellite_catalog_number
+                    )
+                });
+            assert_gp_matches(key, &case.name, source, &file_match.gp, case);
+        }
+    }
+
     fn sgp4_from_case_omm(omm_kvn: &str) -> Sgp4 {
         let lines: Vec<&str> = omm_kvn
             .lines()
@@ -3408,42 +3484,17 @@ mod tests {
     }
 
     #[test]
-    fn test_omm_parsing_cases() {
-        let content = std::fs::read_to_string("test/omm_parsing_cases.toml")
-            .expect("could not read test/omm_parsing_cases.toml");
-        let cases: ParsingCases =
-            from_str(&content).expect("could not parse test/omm_parsing_cases.toml");
-
+    fn test_omm_kvn_parsing_cases() {
+        let cases = load_omm_parsing_cases();
         let from_file = from_omm_kvn_file("test/omm_parsing_cases.txt");
-        let from_xml_file = from_omm_xml_file("test/omm_parsing_cases.xml");
-        let from_json_file = from_omm_json_file("test/omm_parsing_cases.json");
-        let from_csv_file = from_omm_csv_file("test/omm_parsing_cases.csv");
         let expected_file_count = cases.test.values().filter(|c| !c.exception).count();
         assert_eq!(
             from_file.len(),
             expected_file_count,
             "omm_parsing_cases.txt should contain one entry per non-error TOML case"
         );
-        assert_eq!(
-            from_xml_file.len(),
-            expected_file_count,
-            "omm_parsing_cases.xml should contain one entry per non-error TOML case"
-        );
-        assert_eq!(
-            from_json_file.len(),
-            expected_file_count,
-            "omm_parsing_cases.json should contain one entry per non-error TOML case"
-        );
-        assert_eq!(
-            from_csv_file.len(),
-            expected_file_count,
-            "omm_parsing_cases.csv should contain one entry per non-error TOML case"
-        );
 
-        let mut keys: Vec<&String> = cases.test.keys().collect();
-        keys.sort();
-
-        for key in keys {
+        for key in sorted_omm_keys(&cases) {
             let case = &cases.test[key];
 
             if case.exception {
@@ -3490,40 +3541,46 @@ mod tests {
                     )
                 });
             assert_gp_matches(key, &case.name, "from_omm_kvn_file", &file_match.gp, case);
-
-            let xml_match = from_xml_file
-                .iter()
-                .find(|s| s.gp.satellite_catalog_number == case.satellite_catalog_number)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "case {key} ({}): catalog {} missing from omm_parsing_cases.xml parse",
-                        case.name, case.satellite_catalog_number
-                    )
-                });
-            assert_gp_matches(key, &case.name, "from_omm_xml_file", &xml_match.gp, case);
-
-            let json_match = from_json_file
-                .iter()
-                .find(|s| s.gp.satellite_catalog_number == case.satellite_catalog_number)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "case {key} ({}): catalog {} missing from omm_parsing_cases.json parse",
-                        case.name, case.satellite_catalog_number
-                    )
-                });
-            assert_gp_matches(key, &case.name, "from_omm_json_file", &json_match.gp, case);
-
-            let csv_match = from_csv_file
-                .iter()
-                .find(|s| s.gp.satellite_catalog_number == case.satellite_catalog_number)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "case {key} ({}): catalog {} missing from omm_parsing_cases.csv parse",
-                        case.name, case.satellite_catalog_number
-                    )
-                });
-            assert_gp_matches(key, &case.name, "from_omm_csv_file", &csv_match.gp, case);
         }
+    }
+
+    #[cfg(feature = "xml")]
+    #[test]
+    fn test_omm_xml_parsing_cases() {
+        let cases = load_omm_parsing_cases();
+        let from_xml_file = from_omm_xml_file("test/omm_parsing_cases.xml");
+        assert_omm_file_matches_cases(
+            &cases,
+            &from_xml_file,
+            "from_omm_xml_file",
+            "omm_parsing_cases.xml",
+        );
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn test_omm_json_parsing_cases() {
+        let cases = load_omm_parsing_cases();
+        let from_json_file = from_omm_json_file("test/omm_parsing_cases.json");
+        assert_omm_file_matches_cases(
+            &cases,
+            &from_json_file,
+            "from_omm_json_file",
+            "omm_parsing_cases.json",
+        );
+    }
+
+    #[cfg(feature = "csv")]
+    #[test]
+    fn test_omm_csv_parsing_cases() {
+        let cases = load_omm_parsing_cases();
+        let from_csv_file = from_omm_csv_file("test/omm_parsing_cases.csv");
+        assert_omm_file_matches_cases(
+            &cases,
+            &from_csv_file,
+            "from_omm_csv_file",
+            "omm_parsing_cases.csv",
+        );
     }
 
     fn assert_gp_eq(label: &str, original: &GenPerturbElementSet, exported: &GenPerturbElementSet) {
@@ -3671,6 +3728,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "xml")]
     #[test]
     fn test_omm_xml_export_empty() {
         // An empty slice should produce an NDM document with no OMM records
@@ -3679,6 +3737,7 @@ mod tests {
         assert!(reparsed.is_empty());
     }
 
+    #[cfg(feature = "xml")]
     #[test]
     fn test_omm_xml_export_string_roundtrip() {
         // Parse the XML test file, export, and parse the export
@@ -3692,6 +3751,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "xml")]
     #[test]
     fn test_omm_xml_export_file_roundtrip() {
         // Parse the XML test file and write it back out
@@ -3708,6 +3768,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "json")]
     #[test]
     fn test_omm_json_export_empty() {
         // An empty slice should produce an empty JSON array
@@ -3716,6 +3777,7 @@ mod tests {
         assert!(reparsed.is_empty());
     }
 
+    #[cfg(feature = "json")]
     #[test]
     fn test_omm_json_export_string_roundtrip() {
         // Parse the JSON test file, export, and parse the export
@@ -3729,6 +3791,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "json")]
     #[test]
     fn test_omm_json_export_file_roundtrip() {
         // Parse the JSON test file and write it back out
@@ -3745,6 +3808,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "csv")]
     #[test]
     fn test_omm_csv_export_empty() {
         // An empty slice should produce a header-only CSV
@@ -3753,6 +3817,7 @@ mod tests {
         assert!(reparsed.is_empty());
     }
 
+    #[cfg(feature = "csv")]
     #[test]
     fn test_omm_csv_export_string_roundtrip() {
         // Parse the CSV test file, export, and parse the export
@@ -3766,6 +3831,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "csv")]
     #[test]
     fn test_omm_csv_export_file_roundtrip() {
         // Parse the CSV test file and write it back out

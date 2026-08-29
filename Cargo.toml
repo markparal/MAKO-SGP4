@@ -3,15 +3,28 @@ name = "mako-sgp4"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = ""
-documentation = ""
+authors = [
+    "Mark Paral",
+]
+description = "SGP4 Propagator"
 readme = "README.md"
-homepage = ""
+homepage = "https://github.com/markparal/MAKO-SGP4"
 repository = "https://github.com/markparal/MAKO-SGP4"
 license = "MIT"
-license-file = "LICENSE"
-keywords = []
-categories = []
+keywords = [
+    "satellite",
+    "orbit",
+    "sgp4",
+    "tle",
+    "omm",
+    "astrodynamics",
+]
+categories = [
+    "aerospace",
+    "mathematics",
+    "science",
+    "parser-implementations",
+]
 include = [
     "/src",
     "/examples",
@@ -24,10 +37,16 @@ include = [
 name = "mako_sgp4"
 path = "src/lib.rs"
 
+[features]
+default = ["xml", "json", "csv"]
+xml = ["dep:roxmltree"]
+json = ["dep:serde_json"]
+csv = ["dep:csv"]
+
 [dependencies]
-csv = "1.4.0"
-roxmltree = "0.21.1"
-serde_json = "1.0.151"
+csv = { version = "1.4.0", optional = true }
+roxmltree = { version = "0.21.1", optional = true }
+serde_json = { version = "1.0.151", optional = true }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
