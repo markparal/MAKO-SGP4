@@ -1301,7 +1301,7 @@ pub fn from_omm_kvn_file(omm_kvn_file_path: &str) -> Vec<Sgp4> {
 /// * If a present field cannot be parsed as the requested type
 #[cfg(test)]
 fn kvn_parse<T: FromOmm>(lines: &[&str], field: &str) -> T {
-    return omm_typed_value(kvn_lookup(lines, field), field);
+    omm_typed_value(kvn_lookup(lines, field), field)
 }
 
 /// Look up a KVN keyword and return the cleaned value, if present
@@ -3045,8 +3045,8 @@ mod tests {
         let checksum2 = tle_checksum(tle_line2);
 
         // Assert the checksum is correct
-        assert_eq!(checksum, true);
-        assert_eq!(checksum2, false);
+        assert!(checksum);
+        assert!(!checksum2);
     }
 
     // -------------------------------------------------------

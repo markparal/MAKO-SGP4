@@ -427,7 +427,7 @@ mod tests {
 
         let (jd1, jdfrac1) = utc2jday(&datetime1).unwrap();
         let jd1_total = jd1 + jdfrac1;
-        let jd1_expect = 2436653.024179664440453;
+        let jd1_expect = 2_436_653.024_179_664_4;
         assert!(
             (jd1_total - jd1_expect).abs() < 1e-8,
             "Julian Date Test failed: expected {}, got {}",
@@ -448,7 +448,7 @@ mod tests {
 
         let (jd2, jdfrac2) = utc2jday(&datetime2).unwrap();
         let jd2_total = jd2 + jdfrac2;
-        let jd2_expect = 2461063.507326377090067;
+        let jd2_expect = 2_461_063.507_326_377;
         assert!(
             (jd2_total - jd2_expect).abs() < 1e-8,
             "Julian Date Test failed: expected {}, got {}",
@@ -526,7 +526,7 @@ mod tests {
 
         let (mjd1, mjdfrac1) = utc2mjday(&datetime1).unwrap();
         let mjd1_total = mjd1 + mjdfrac1;
-        let mjd1_expect = 50540.675410937503329;
+        let mjd1_expect = 50_540.675_410_937_5;
         assert!(
             (mjd1_total - mjd1_expect).abs() < 1e-8,
             "Modified Julian Date Test failed: expected {}, got {}",
@@ -547,7 +547,7 @@ mod tests {
 
         let (mjd2, mjdfrac2) = utc2mjday(&datetime2).unwrap();
         let mjd2_total = mjd2 + mjdfrac2;
-        let mjd2_expect = 56516.118028043973027;
+        let mjd2_expect = 56_516.118_028_043_97;
         assert!(
             (mjd2_total - mjd2_expect).abs() < 1e-8,
             "Modified Julian Date Test failed: expected {}, got {}",
