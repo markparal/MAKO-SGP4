@@ -598,13 +598,13 @@ pub fn init_atm_effects(
     // Determine parameter s based on perigee height
     let rp = brouwer0.a * (1. - brouwer0.e); // Radius of perigee [Earth Radii]
     let hp = (rp - 1.) * wgs.r_earth_eq; // Perigee height [km]
- 
+
     let s: f64 = if hp >= 156. {
-        (78. + wgs.r_earth_eq) / wgs.r_earth_eq 
+        (78. + wgs.r_earth_eq) / wgs.r_earth_eq
     } else if hp >= 98. {
-        (hp - 78. + wgs.r_earth_eq) / wgs.r_earth_eq 
+        (hp - 78. + wgs.r_earth_eq) / wgs.r_earth_eq
     } else {
-        (20. + wgs.r_earth_eq) / wgs.r_earth_eq 
+        (20. + wgs.r_earth_eq) / wgs.r_earth_eq
     }; // [Earth radii]
 
     // Calculate atmospheric drag parameters
