@@ -168,12 +168,12 @@ pub fn utc2jday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
     let mut jdfrac: f64 = mjdfrac;
 
     // Make JD whole
-    if jdfrac >= 1.0 || jdfrac < 0.0 {
-        jd = jd + jdfrac.floor();
+    if !(0.0..1.0).contains(&jdfrac) {
+        jd += jdfrac.floor();
         jdfrac = jdfrac - jdfrac.floor();
     }
 
-    return Ok((jd, jdfrac));
+    Ok((jd, jdfrac))
 }
 
 /// Convert a datetime in UTC to Modified Julian date (MJD) format.
@@ -223,7 +223,10 @@ pub fn utc2mjday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
     }
 
     // Verify date is after Oct 10th, 1582
-    if utc_datetime.year < 1582 || (utc_datetime.year == 1582 && utc_datetime.month < 10) || (utc_datetime.year == 1582 && utc_datetime.month == 10 && utc_datetime.day < 10) {
+    if utc_datetime.year < 1582
+        || (utc_datetime.year == 1582 && utc_datetime.month < 10)
+        || (utc_datetime.year == 1582 && utc_datetime.month == 10 && utc_datetime.day < 10)
+    {
         return Err(DateError::DateTooEarly);
     }
 
@@ -233,7 +236,7 @@ pub fn utc2mjday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
     let day = utc_datetime.day as f64;
     let hour = utc_datetime.hour as f64;
     let minute = utc_datetime.minute as f64;
-    let second = utc_datetime.second as f64;
+    let second = utc_datetime.second;
 
     // Modify month and year to account for leap years, start year in March instead of January
     let year_leap: f64;
@@ -247,19 +250,20 @@ pub fn utc2mjday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
     }
 
     // Account for leap days with B auxilary quantity
-    let b_leap: f64 = (year_leap / 400.).floor() - (year_leap / 100.).floor() + (year_leap / 4.).floor();
+    let b_leap: f64 =
+        (year_leap / 400.).floor() - (year_leap / 100.).floor() + (year_leap / 4.).floor();
 
     // Calculate the modified Julian date
     let mut mjd = 365. * year_leap - 679004. + b_leap + (30.6001 * (month_leap + 1.)).floor() + day;
     let mut mjdfrac = (second + minute * 60. + hour * 3600.) / 86400.;
 
     // Validate mjdfrac
-    if mjdfrac >= 1.0 || mjdfrac < 0.0 {
-        mjd = mjd + mjdfrac.floor();
+    if !(0.0..1.0).contains(&mjdfrac) {
+        mjd += mjdfrac.floor();
         mjdfrac = mjdfrac - mjdfrac.floor();
     }
 
-    return Ok((mjd, mjdfrac));
+    Ok((mjd, mjdfrac))
 }
 
 /// Convert a year and day of year to a UTC datetime
@@ -322,14 +326,14 @@ pub fn dayofyr2utc(year: i32, dayofyr: f64) -> Result<DateTime, DateError> {
 
     for (idx, &days_in_month) in days_per_month.iter().enumerate() {
         let days_this_month = if idx == 1 && is_leap {
-            29  // February in leap year
+            29 // February in leap year
         } else {
             days_in_month
         };
 
         if day_int <= day_count + days_this_month {
             month = (idx + 1) as i32;
-            day = (day_int - day_count) as i32;
+            day = day_int - day_count;
             break;
         }
         day_count += days_this_month;
@@ -370,7 +374,7 @@ pub fn dayofyr2utc(year: i32, dayofyr: f64) -> Result<DateTime, DateError> {
 
     // Handle day overflow (check if day exceeds days in current month)
     let days_in_current_month = if final_month == 2 && is_leap {
-        29  // February in leap year
+        29 // February in leap year
     } else {
         days_per_month[(final_month - 1) as usize]
     };
@@ -394,10 +398,10 @@ pub fn dayofyr2utc(year: i32, dayofyr: f64) -> Result<DateTime, DateError> {
         hour: final_hour,
         minute: final_minute,
         second: final_second,
-        timezone: Timezone::UTC
+        timezone: Timezone::UTC,
     };
 
-    return Ok(datetime);
+    Ok(datetime)
 }
 
 // ----------
@@ -418,13 +422,18 @@ mod tests {
             hour: 12,
             minute: 34,
             second: 49.123,
-            timezone: Timezone::UTC
+            timezone: Timezone::UTC,
         };
 
         let (jd1, jdfrac1) = utc2jday(&datetime1).unwrap();
         let jd1_total = jd1 + jdfrac1;
         let jd1_expect = 2436653.024179664440453;
-        assert!((jd1_total - jd1_expect).abs() < 1e-8,"Julian Date Test failed: expected {}, got {}", jd1_expect, jd1_total);
+        assert!(
+            (jd1_total - jd1_expect).abs() < 1e-8,
+            "Julian Date Test failed: expected {}, got {}",
+            jd1_expect,
+            jd1_total
+        );
 
         // Make a test date in 21st century
         let datetime2 = DateTime {
@@ -434,13 +443,18 @@ mod tests {
             hour: 0,
             minute: 10,
             second: 32.999,
-            timezone: Timezone::UTC
+            timezone: Timezone::UTC,
         };
 
         let (jd2, jdfrac2) = utc2jday(&datetime2).unwrap();
         let jd2_total = jd2 + jdfrac2;
         let jd2_expect = 2461063.507326377090067;
-        assert!((jd2_total - jd2_expect).abs() < 1e-8,"Julian Date Test failed: expected {}, got {}", jd2_expect, jd2_total);
+        assert!(
+            (jd2_total - jd2_expect).abs() < 1e-8,
+            "Julian Date Test failed: expected {}, got {}",
+            jd2_expect,
+            jd2_total
+        );
 
         // Make a test date around year 2000
         let datetime3 = DateTime {
@@ -450,13 +464,18 @@ mod tests {
             hour: 0,
             minute: 0,
             second: 0.0,
-            timezone: Timezone::UTC
+            timezone: Timezone::UTC,
         };
 
         let (jd3, jdfrac3) = utc2jday(&datetime3).unwrap();
         let jd3_total = jd3 + jdfrac3;
         let jd3_expect = 2451544.5;
-        assert!((jd3_total - jd3_expect).abs() < 1e-8,"Julian Date Test failed: expected {}, got {}", jd3_expect, jd3_total);
+        assert!(
+            (jd3_total - jd3_expect).abs() < 1e-8,
+            "Julian Date Test failed: expected {}, got {}",
+            jd3_expect,
+            jd3_total
+        );
 
         // Test date too early (before Oct 10, 1582)
         let datetime4 = DateTime {
@@ -466,11 +485,14 @@ mod tests {
             hour: 12,
             minute: 0,
             second: 0.0,
-            timezone: Timezone::UTC
+            timezone: Timezone::UTC,
         };
 
         let result = utc2jday(&datetime4);
-        assert!(result.is_err(), "Should return error for date before Oct 10, 1582");
+        assert!(
+            result.is_err(),
+            "Should return error for date before Oct 10, 1582"
+        );
         assert_eq!(result.unwrap_err(), DateError::DateTooEarly);
 
         // Test non-UTC datetime
@@ -481,7 +503,7 @@ mod tests {
             hour: 12,
             minute: 0,
             second: 0.0,
-            timezone: Timezone::UT1
+            timezone: Timezone::UT1,
         };
 
         let result = utc2jday(&datetime5);
@@ -499,13 +521,18 @@ mod tests {
             hour: 16,
             minute: 12,
             second: 35.505,
-            timezone: Timezone::UTC
+            timezone: Timezone::UTC,
         };
 
         let (mjd1, mjdfrac1) = utc2mjday(&datetime1).unwrap();
         let mjd1_total = mjd1 + mjdfrac1;
         let mjd1_expect = 50540.675410937503329;
-        assert!((mjd1_total - mjd1_expect).abs() < 1e-8,"Modified Julian Date Test failed: expected {}, got {}", mjd1_expect, mjd1_total);
+        assert!(
+            (mjd1_total - mjd1_expect).abs() < 1e-8,
+            "Modified Julian Date Test failed: expected {}, got {}",
+            mjd1_expect,
+            mjd1_total
+        );
 
         // Make a test date in 21st century
         let datetime2 = DateTime {
@@ -515,13 +542,18 @@ mod tests {
             hour: 2,
             minute: 49,
             second: 57.623,
-            timezone: Timezone::UTC
+            timezone: Timezone::UTC,
         };
 
         let (mjd2, mjdfrac2) = utc2mjday(&datetime2).unwrap();
         let mjd2_total = mjd2 + mjdfrac2;
         let mjd2_expect = 56516.118028043973027;
-        assert!((mjd2_total - mjd2_expect).abs() < 1e-8,"Modified Julian Date Test failed: expected {}, got {}", mjd2_expect, mjd2_total);
+        assert!(
+            (mjd2_total - mjd2_expect).abs() < 1e-8,
+            "Modified Julian Date Test failed: expected {}, got {}",
+            mjd2_expect,
+            mjd2_total
+        );
 
         // Make a test date around year 2000
         let datetime3 = DateTime {
@@ -531,13 +563,18 @@ mod tests {
             hour: 0,
             minute: 0,
             second: 0.0,
-            timezone: Timezone::UTC
+            timezone: Timezone::UTC,
         };
 
         let (mjd3, mjdfrac3) = utc2mjday(&datetime3).unwrap();
         let mjd3_total = mjd3 + mjdfrac3;
         let mjd3_expect = 51544.0;
-        assert!((mjd3_total - mjd3_expect).abs() < 1e-8,"Modified Julian Date Test failed: expected {}, got {}", mjd3_expect, mjd3_total);
+        assert!(
+            (mjd3_total - mjd3_expect).abs() < 1e-8,
+            "Modified Julian Date Test failed: expected {}, got {}",
+            mjd3_expect,
+            mjd3_total
+        );
 
         // Test date too early (before Oct 10, 1582)
         let datetime4 = DateTime {
@@ -547,10 +584,13 @@ mod tests {
             hour: 12,
             minute: 0,
             second: 0.0,
-            timezone: Timezone::UTC
+            timezone: Timezone::UTC,
         };
         let result = utc2mjday(&datetime4);
-        assert!(result.is_err(), "Should return error for date before Oct 10, 1582");
+        assert!(
+            result.is_err(),
+            "Should return error for date before Oct 10, 1582"
+        );
         assert_eq!(result.unwrap_err(), DateError::DateTooEarly);
 
         // Test non-UTC datetime
@@ -561,7 +601,7 @@ mod tests {
             hour: 12,
             minute: 0,
             second: 0.0,
-            timezone: Timezone::UT1
+            timezone: Timezone::UT1,
         };
 
         let result = utc2mjday(&datetime5);
@@ -573,67 +613,219 @@ mod tests {
     fn test_dayofyr_rounding() {
         // Test date in 20th century - Day 100.5 of 1959 (April 10, 1959 at 12:00:00)
         let datetime1 = dayofyr2utc(1959, 100.5).unwrap();
-        assert_eq!(datetime1.year, 1959, "Day 100.5 of 1959: year should be 1959, got {}", datetime1.year);
-        assert_eq!(datetime1.month, 4, "Day 100.5 of 1959: month should be 4 (April), got {}", datetime1.month);
-        assert_eq!(datetime1.day, 10, "Day 100.5 of 1959: day should be 10, got {}", datetime1.day);
-        assert_eq!(datetime1.hour, 12, "Day 100.5 of 1959: hour should be 12, got {}", datetime1.hour);
-        assert_eq!(datetime1.minute, 0, "Day 100.5 of 1959: minute should be 0, got {}", datetime1.minute);
-        assert!((datetime1.second - 0.0).abs() < 1e-6, "Day 100.5 of 1959: second should be 0.0, got {}", datetime1.second);
+        assert_eq!(
+            datetime1.year, 1959,
+            "Day 100.5 of 1959: year should be 1959, got {}",
+            datetime1.year
+        );
+        assert_eq!(
+            datetime1.month, 4,
+            "Day 100.5 of 1959: month should be 4 (April), got {}",
+            datetime1.month
+        );
+        assert_eq!(
+            datetime1.day, 10,
+            "Day 100.5 of 1959: day should be 10, got {}",
+            datetime1.day
+        );
+        assert_eq!(
+            datetime1.hour, 12,
+            "Day 100.5 of 1959: hour should be 12, got {}",
+            datetime1.hour
+        );
+        assert_eq!(
+            datetime1.minute, 0,
+            "Day 100.5 of 1959: minute should be 0, got {}",
+            datetime1.minute
+        );
+        assert!(
+            (datetime1.second - 0.0).abs() < 1e-6,
+            "Day 100.5 of 1959: second should be 0.0, got {}",
+            datetime1.second
+        );
 
         // Test date in 21st century - Day 200.75 of 2024 (July 18, 2024 at 18:00:00)
         let datetime2 = dayofyr2utc(2024, 200.75).unwrap();
-        assert_eq!(datetime2.year, 2024, "Day 200.75 of 2024: year should be 2024, got {}", datetime2.year);
-        assert_eq!(datetime2.month, 7, "Day 200.75 of 2024: month should be 7 (July), got {}", datetime2.month);
-        assert_eq!(datetime2.day, 18, "Day 200.75 of 2024: day should be 18, got {}", datetime2.day);
-        assert_eq!(datetime2.hour, 18, "Day 200.75 of 2024: hour should be 18, got {}", datetime2.hour);
-        assert_eq!(datetime2.minute, 0, "Day 200.75 of 2024: minute should be 0, got {}", datetime2.minute);
-        assert!((datetime2.second - 0.0).abs() < 1e-6, "Day 200.75 of 2024: second should be 0.0, got {}", datetime2.second);
+        assert_eq!(
+            datetime2.year, 2024,
+            "Day 200.75 of 2024: year should be 2024, got {}",
+            datetime2.year
+        );
+        assert_eq!(
+            datetime2.month, 7,
+            "Day 200.75 of 2024: month should be 7 (July), got {}",
+            datetime2.month
+        );
+        assert_eq!(
+            datetime2.day, 18,
+            "Day 200.75 of 2024: day should be 18, got {}",
+            datetime2.day
+        );
+        assert_eq!(
+            datetime2.hour, 18,
+            "Day 200.75 of 2024: hour should be 18, got {}",
+            datetime2.hour
+        );
+        assert_eq!(
+            datetime2.minute, 0,
+            "Day 200.75 of 2024: minute should be 0, got {}",
+            datetime2.minute
+        );
+        assert!(
+            (datetime2.second - 0.0).abs() < 1e-6,
+            "Day 200.75 of 2024: second should be 0.0, got {}",
+            datetime2.second
+        );
 
         // Test year rollover - Day 365.9999999999 of 2023 (very close to midnight of 2024)
         let datetime3 = dayofyr2utc(2023, 365.9999999999).unwrap();
-        assert_eq!(datetime3.year, 2023, "Day 365.9999999999 of 2023: year should be 2023, got {}", datetime3.year);
-        assert_eq!(datetime3.month, 12, "Day 365.9999999999 of 2023: month should be 12 (December), got {}", datetime3.month);
-        assert_eq!(datetime3.day, 31, "Day 365.9999999999 of 2023: day should be 31, got {}", datetime3.day);
-        assert_eq!(datetime3.hour, 23, "Day 365.9999999999 of 2023: hour should be 23, got {}", datetime3.hour);
-        assert_eq!(datetime3.minute, 59, "Day 365.9999999999 of 2023: minute should be 59, got {}", datetime3.minute);
-        assert!(datetime3.second >= 59.0 && datetime3.second < 60.0, "Day 365.9999999999 of 2023: second should be between 59.0 and 60.0, got {}", datetime3.second);
+        assert_eq!(
+            datetime3.year, 2023,
+            "Day 365.9999999999 of 2023: year should be 2023, got {}",
+            datetime3.year
+        );
+        assert_eq!(
+            datetime3.month, 12,
+            "Day 365.9999999999 of 2023: month should be 12 (December), got {}",
+            datetime3.month
+        );
+        assert_eq!(
+            datetime3.day, 31,
+            "Day 365.9999999999 of 2023: day should be 31, got {}",
+            datetime3.day
+        );
+        assert_eq!(
+            datetime3.hour, 23,
+            "Day 365.9999999999 of 2023: hour should be 23, got {}",
+            datetime3.hour
+        );
+        assert_eq!(
+            datetime3.minute, 59,
+            "Day 365.9999999999 of 2023: minute should be 59, got {}",
+            datetime3.minute
+        );
+        assert!(
+            datetime3.second >= 59.0 && datetime3.second < 60.0,
+            "Day 365.9999999999 of 2023: second should be between 59.0 and 60.0, got {}",
+            datetime3.second
+        );
 
         // Test leap year day of year - Day 366 of 2024 (December 31, 2024)
         let datetime4 = dayofyr2utc(2024, 366.0).unwrap();
-        assert_eq!(datetime4.year, 2024, "Day 366 of 2024: year should be 2024, got {}", datetime4.year);
-        assert_eq!(datetime4.month, 12, "Day 366 of 2024: month should be 12 (December), got {}", datetime4.month);
-        assert_eq!(datetime4.day, 31, "Day 366 of 2024: day should be 31, got {}", datetime4.day);
-        assert_eq!(datetime4.hour, 0, "Day 366 of 2024: hour should be 0, got {}", datetime4.hour);
-        assert_eq!(datetime4.minute, 0, "Day 366 of 2024: minute should be 0, got {}", datetime4.minute);
-        assert!((datetime4.second - 0.0).abs() < 1e-6, "Day 366 of 2024: second should be 0.0, got {}", datetime4.second);
+        assert_eq!(
+            datetime4.year, 2024,
+            "Day 366 of 2024: year should be 2024, got {}",
+            datetime4.year
+        );
+        assert_eq!(
+            datetime4.month, 12,
+            "Day 366 of 2024: month should be 12 (December), got {}",
+            datetime4.month
+        );
+        assert_eq!(
+            datetime4.day, 31,
+            "Day 366 of 2024: day should be 31, got {}",
+            datetime4.day
+        );
+        assert_eq!(
+            datetime4.hour, 0,
+            "Day 366 of 2024: hour should be 0, got {}",
+            datetime4.hour
+        );
+        assert_eq!(
+            datetime4.minute, 0,
+            "Day 366 of 2024: minute should be 0, got {}",
+            datetime4.minute
+        );
+        assert!(
+            (datetime4.second - 0.0).abs() < 1e-6,
+            "Day 366 of 2024: second should be 0.0, got {}",
+            datetime4.second
+        );
 
         // Test leap year with fractional day - Day 60.5 of 2024 (February 29, 2024 at 12:00:00)
         let datetime5 = dayofyr2utc(2024, 60.5).unwrap();
-        assert_eq!(datetime5.year, 2024, "Day 60.5 of 2024: year should be 2024, got {}", datetime5.year);
-        assert_eq!(datetime5.month, 2, "Day 60.5 of 2024: month should be 2 (February), got {}", datetime5.month);
-        assert_eq!(datetime5.day, 29, "Day 60.5 of 2024: day should be 29 (leap day), got {}", datetime5.day);
-        assert_eq!(datetime5.hour, 12, "Day 60.5 of 2024: hour should be 12, got {}", datetime5.hour);
-        assert_eq!(datetime5.minute, 0, "Day 60.5 of 2024: minute should be 0, got {}", datetime5.minute);
-        assert!((datetime5.second - 0.0).abs() < 1e-6, "Day 60.5 of 2024: second should be 0.0, got {}", datetime5.second);
+        assert_eq!(
+            datetime5.year, 2024,
+            "Day 60.5 of 2024: year should be 2024, got {}",
+            datetime5.year
+        );
+        assert_eq!(
+            datetime5.month, 2,
+            "Day 60.5 of 2024: month should be 2 (February), got {}",
+            datetime5.month
+        );
+        assert_eq!(
+            datetime5.day, 29,
+            "Day 60.5 of 2024: day should be 29 (leap day), got {}",
+            datetime5.day
+        );
+        assert_eq!(
+            datetime5.hour, 12,
+            "Day 60.5 of 2024: hour should be 12, got {}",
+            datetime5.hour
+        );
+        assert_eq!(
+            datetime5.minute, 0,
+            "Day 60.5 of 2024: minute should be 0, got {}",
+            datetime5.minute
+        );
+        assert!(
+            (datetime5.second - 0.0).abs() < 1e-6,
+            "Day 60.5 of 2024: second should be 0.0, got {}",
+            datetime5.second
+        );
 
         // Test day of year too high - Day 366.1 of non-leap year 2023
         let result = dayofyr2utc(2023, 366.1);
-        assert!(result.is_err(), "Day 366.1 of 2023 (non-leap year): should return error for day of year exceeding 365, got Ok({:?})", result);
-        assert_eq!(result.unwrap_err(), DateError::InvalidDayOfYear, "Day 366.1 of 2023: error should be InvalidDayOfYear");
+        assert!(
+            result.is_err(),
+            "Day 366.1 of 2023 (non-leap year): should return error for day of year exceeding 365, got Ok({:?})",
+            result
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            DateError::InvalidDayOfYear,
+            "Day 366.1 of 2023: error should be InvalidDayOfYear"
+        );
 
         // Test day of year too high - Day 367 of leap year 2024
         let result = dayofyr2utc(2024, 367.0);
-        assert!(result.is_err(), "Day 367 of 2024 (leap year): should return error for day of year exceeding 366, got Ok({:?})", result);
-        assert_eq!(result.unwrap_err(), DateError::InvalidDayOfYear, "Day 367 of 2024: error should be InvalidDayOfYear");
+        assert!(
+            result.is_err(),
+            "Day 367 of 2024 (leap year): should return error for day of year exceeding 366, got Ok({:?})",
+            result
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            DateError::InvalidDayOfYear,
+            "Day 367 of 2024: error should be InvalidDayOfYear"
+        );
 
         // Test day of year too low - Day 0.5
         let result = dayofyr2utc(2024, 0.5);
-        assert!(result.is_err(), "Day 0.5 of 2024: should return error for day of year less than 1, got Ok({:?})", result);
-        assert_eq!(result.unwrap_err(), DateError::InvalidDayOfYear, "Day 0.5 of 2024: error should be InvalidDayOfYear");
+        assert!(
+            result.is_err(),
+            "Day 0.5 of 2024: should return error for day of year less than 1, got Ok({:?})",
+            result
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            DateError::InvalidDayOfYear,
+            "Day 0.5 of 2024: error should be InvalidDayOfYear"
+        );
 
         // Test day of year too low - Day 0.0
         let result = dayofyr2utc(2024, 0.0);
-        assert!(result.is_err(), "Day 0.0 of 2024: should return error for day of year equal to 0, got Ok({:?})", result);
-        assert_eq!(result.unwrap_err(), DateError::InvalidDayOfYear, "Day 0.0 of 2024: error should be InvalidDayOfYear");
+        assert!(
+            result.is_err(),
+            "Day 0.0 of 2024: should return error for day of year equal to 0, got Ok({:?})",
+            result
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            DateError::InvalidDayOfYear,
+            "Day 0.0 of 2024: error should be InvalidDayOfYear"
+        );
     }
 }

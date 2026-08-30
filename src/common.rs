@@ -193,10 +193,7 @@ pub const WGS84: Wgs = Wgs {
 /// ```
 pub fn deg2rad(theta: f64) -> f64 {
     // Convert to radians
-    let theta_rad = PI / 180. * theta;
-
-    // Return theta in radians
-    return theta_rad;
+    PI / 180. * theta
 }
 
 /// Calculate the orbital period from semi-major axis and gravitational parameter
@@ -227,9 +224,7 @@ pub fn deg2rad(theta: f64) -> f64 {
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 pub fn calc_period(a: f64, mu: f64) -> f64 {
     // Calculate time period in minutes
-    let period = 2. * PI * (a.powi(3) / mu).sqrt() / 60.;
-
-    return period;
+    2. * PI * (a.powi(3) / mu).sqrt() / 60.
 }
 
 // ----------

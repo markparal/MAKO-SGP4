@@ -23,8 +23,8 @@ use csv::{ReaderBuilder, WriterBuilder};
 // ------------------
 // Internal Libraries
 // ------------------
-use crate::time::{dayofyr2utc, DateTime, Timezone};
-use crate::sgp4::{init_sgp4, Sgp4};
+use crate::sgp4::{Sgp4, init_sgp4};
+use crate::time::{DateTime, Timezone, dayofyr2utc};
 
 // -------
 // Structs
@@ -140,7 +140,7 @@ impl FromOmm for f64 {
     }
 
     fn from_omm(field: &str, value: &str) -> Self {
-        let normalized = value.replace('D', "E").replace('d', "E");
+        let normalized = value.replace(['D', 'd'], "E");
         normalized.parse::<f64>().unwrap_or_else(|_| {
             panic!("OMM field {} is not a valid number: {}", field, value);
         })
@@ -231,7 +231,7 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Sgp4 {
 
     // Extract the common name of the satellite from line 0
     if let Some(name_line) = line0 {
-        if name_line.len() < 1 || name_line.len() > 24 {
+        if name_line.is_empty() || name_line.len() > 24 {
             panic!(
                 "TLE line 0 is invalid: name must be 1-24 characters, got {}",
                 name_line.len()
@@ -374,9 +374,7 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Sgp4 {
     }
 
     // Initialize the SGP4 parameters
-    let sgp4 = init_sgp4(&gp, None);
-
-    return sgp4;
+    init_sgp4(&gp, None)
 }
 
 /// Builds a vector of [`Sgp4`] structs from a string containing Two-Line Element (TLE) sets.
@@ -452,7 +450,7 @@ pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
         }
     }
     // Return vector of SGP4 structs
-    return sgp4s;
+    sgp4s
 }
 
 /// Builds a vector of [`Sgp4`] structs from a file containing Two-Line Element (TLE) sets.
@@ -489,10 +487,7 @@ pub fn from_tle_file(file_path: &str) -> Vec<Sgp4> {
     let tle_string = fs::read_to_string(file_path).expect("Cannot read TLE file");
 
     // Parse tle string into a vector of SGP4 structs
-    let sgp4s = from_tle_string(&tle_string);
-
-    // Return the vector of SGP4 structs
-    return sgp4s;
+    from_tle_string(&tle_string)
 }
 
 /// Calculate the checksum of the Two-Line Element (TLE) line.
@@ -539,10 +534,9 @@ pub fn calc_checksum(line: &str) -> i32 {
     }
 
     // Calculate the checksum
-    checksum = checksum % 10;
+    checksum %= 10;
 
-    // Return the checksum
-    return checksum;
+    checksum
 }
 
 /// Check if the TLE line has been corrupted by running a checksum test.
@@ -573,11 +567,7 @@ pub fn tle_checksum(line: &str) -> bool {
     let checksum = calc_checksum(line);
 
     // Compare the checksum to the last character of the line
-    if checksum == line[68..69].parse::<i32>().unwrap() {
-        return true;
-    } else {
-        return false;
-    }
+    checksum == line[68..69].parse::<i32>().unwrap()
 }
 
 /// Convert a two-digit TLE year to a four-digit Gregorian year.
@@ -592,9 +582,9 @@ pub fn tle_checksum(line: &str) -> bool {
 /// * Four-digit year in the range 1957-2056
 fn tle_full_year(two_digit_year: i32) -> i32 {
     if two_digit_year < 57 {
-        return 2000 + two_digit_year;
+        2000 + two_digit_year
     } else {
-        return 1900 + two_digit_year;
+        1900 + two_digit_year
     }
 }
 
@@ -701,7 +691,7 @@ fn format_tle_catalog_number(catalog: i32) -> String {
             catalog
         );
     };
-    return format!("{}{:04}", letter, rest);
+    format!("{}{:04}", letter, rest)
 }
 
 /// Format an international designator for a TLE
@@ -734,7 +724,7 @@ fn format_tle_intl_des(intl: &str) -> String {
     if field.len() > 8 {
         field.truncate(8);
     }
-    return format!("{:<8}", field);
+    format!("{:<8}", field)
 }
 
 /// Format a TLE epoch from a UTC datetime
@@ -773,11 +763,10 @@ fn format_tle_epoch(epoch: &DateTime) -> String {
     if second < 0.0 {
         second = 0.0;
     }
-    let day_frac =
-        (epoch.hour as f64 * 3600.0 + epoch.minute as f64 * 60.0 + second) / 86400.0;
+    let day_frac = (epoch.hour as f64 * 3600.0 + epoch.minute as f64 * 60.0 + second) / 86400.0;
     let dayofyr = day_int as f64 + day_frac;
 
-    return format!("{:02}{:012.8}", two_digit_year, dayofyr);
+    format!("{:02}{:012.8}", two_digit_year, dayofyr)
 }
 
 /// Format the TLE-printed first derivative of mean motion
@@ -801,7 +790,7 @@ fn format_tle_ndot(value: f64) -> String {
     if value < 0.0 && digits != 0 {
         return format!("-.{:08}", digits);
     }
-    return format!(" .{:08}", digits);
+    format!(" .{:08}", digits)
 }
 
 /// Format a TLE exponential field (second derivative of mean motion or BSTAR)
@@ -844,7 +833,7 @@ fn format_tle_exp(value: f64) -> String {
     }
 
     let exp_sign = if exp >= 0 { '+' } else { '-' };
-    return format!("{}{:05}{}{}", sign, digits, exp_sign, exp.abs());
+    format!("{}{:05}{}{}", sign, digits, exp_sign, exp.abs())
 }
 
 /// Format eccentricity for a TLE
@@ -860,13 +849,8 @@ fn format_tle_exp(value: f64) -> String {
 fn format_tle_eccentricity(eccentricity: f64) -> String {
     // Seven digits after the implied 0. prefix
     let mut digits = (eccentricity.abs() * 1e7).round() as i64;
-    if digits < 0 {
-        digits = 0;
-    }
-    if digits > 9999999 {
-        digits = 9999999;
-    }
-    return format!("{:07}", digits);
+    digits = digits.clamp(0, 9999999);
+    format!("{:07}", digits)
 }
 
 /// Append a TLE checksum digit to a 68-character line
@@ -891,7 +875,7 @@ fn tle_line_with_checksum(line68: &str) -> String {
     }
 
     // Append checksum as the 69th character
-    return format!("{}{}", line68, calc_checksum(line68));
+    format!("{}{}", line68, calc_checksum(line68))
 }
 
 /// Build TLE line 1 from a general perturbation element set
@@ -945,7 +929,7 @@ fn format_tle_line1(gp: &GenPerturbElementSet) -> String {
         "1 {}{} {} {} {} {} {} {} {:>4}",
         catalog, classification, intl_des, epoch, ndot, nddot, bstar, ephem_type, elset
     );
-    return tle_line_with_checksum(&line68);
+    tle_line_with_checksum(&line68)
 }
 
 /// Build TLE line 2 from a general perturbation element set
@@ -967,8 +951,7 @@ fn format_tle_line2(gp: &GenPerturbElementSet) -> String {
     let inclination = format!("{:8.4}", gp.inclination);
 
     // Right ascension of ascending node [degs]
-    let right_ascension_of_ascending_node =
-        format!("{:8.4}", gp.right_ascension_of_ascending_node);
+    let right_ascension_of_ascending_node = format!("{:8.4}", gp.right_ascension_of_ascending_node);
 
     // Eccentricity (decimal point assumed)
     let ecc = format_tle_eccentricity(gp.eccentricity);
@@ -996,7 +979,7 @@ fn format_tle_line2(gp: &GenPerturbElementSet) -> String {
         mean_motion,
         rev
     );
-    return tle_line_with_checksum(&line68);
+    tle_line_with_checksum(&line68)
 }
 
 /// Build one TLE from a general perturbation element set
@@ -1030,7 +1013,7 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> String {
     tle.push('\n');
     tle.push_str(&format_tle_line2(gp));
     tle.push('\n');
-    return tle;
+    tle
 }
 
 /// Builds a Two-Line Element (TLE) string from a slice of [`Sgp4`] structs.
@@ -1078,7 +1061,7 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> String {
         records.push_str(&gp_to_tle(&sgp4.gp));
     }
 
-    return records;
+    records
 }
 
 /// Writes a Two-Line Element (TLE) file from a slice of [`Sgp4`] structs.
@@ -1169,7 +1152,7 @@ pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 pub fn from_omm_kvn_lines(lines: &[&str]) -> Sgp4 {
-    return sgp4_from_omm_lookup(|field| kvn_lookup(lines, field));
+    sgp4_from_omm_lookup(|field| kvn_lookup(lines, field))
 }
 
 /// Builds a vector of [`Sgp4`] structs from a string containing Orbit Mean-Elements Message
@@ -1255,7 +1238,7 @@ pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
     }
 
     // Return vector of SGP4 structs
-    return sgp4s;
+    sgp4s
 }
 
 /// Builds a vector of [`Sgp4`] structs from a file containing Orbit Mean-Elements Message
@@ -1298,10 +1281,7 @@ pub fn from_omm_kvn_file(omm_kvn_file_path: &str) -> Vec<Sgp4> {
     let omm_kvn_string = fs::read_to_string(omm_kvn_file_path).expect("Cannot read OMM KVN file");
 
     // Parse OMM string into a vector of SGP4 structs
-    let sgp4s = from_omm_kvn_string(&omm_kvn_string);
-
-    // Return the vector of SGP4 structs
-    return sgp4s;
+    from_omm_kvn_string(&omm_kvn_string)
 }
 
 /// Parse a KVN field from OMM record lines
@@ -1354,7 +1334,7 @@ fn kvn_lookup(lines: &[&str], field: &str) -> Option<String> {
         return Some(clean_kvn_value(value));
     }
 
-    return None;
+    None
 }
 
 /// Convert an optional OMM field string into type T
@@ -1396,69 +1376,38 @@ fn sgp4_from_omm_lookup<F>(lookup: F) -> Sgp4
 where
     F: Fn(&str) -> Option<String>,
 {
-    // Create mutable General Perturbation Element Set struct
-    let mut gp = GenPerturbElementSet::default();
-
-    // Common name of the satellite
-    gp.common_name = omm_typed_value(lookup("OBJECT_NAME"), "OBJECT_NAME");
-
-    // NORAD satellite catalog number
-    gp.satellite_catalog_number = omm_typed_value(lookup("NORAD_CAT_ID"), "NORAD_CAT_ID");
-
-    // Classification (default unclassified)
-    gp.classification = omm_typed_value(lookup("CLASSIFICATION_TYPE"), "CLASSIFICATION_TYPE");
-
-    // International designator
-    gp.international_designator = omm_typed_value(lookup("OBJECT_ID"), "OBJECT_ID");
-
-    // Epoch UTC datetime
-    gp.epoch_datetime = omm_typed_value(lookup("EPOCH"), "EPOCH");
-
-    // 1st derivative of mean motion [revs/day^2]
-    // OMM stores the TLE-printed value, so multiply by 2
-    gp.first_derivative_of_mean_motion =
-        omm_typed_value::<f64>(lookup("MEAN_MOTION_DOT"), "MEAN_MOTION_DOT") * 2.0;
-
-    // 2nd derivative of mean motion [revs/day^3]
-    // OMM stores the TLE-printed value, so multiply by 6
-    gp.second_derivative_of_mean_motion =
-        omm_typed_value::<f64>(lookup("MEAN_MOTION_DDOT"), "MEAN_MOTION_DDOT") * 6.0;
-
-    // BSTAR drag term [1/Earth radii]
-    gp.bstar = omm_typed_value(lookup("BSTAR"), "BSTAR");
-
-    // Ephemeris type
-    gp.ephemeris_type = omm_typed_value(lookup("EPHEMERIS_TYPE"), "EPHEMERIS_TYPE");
-
-    // Element set number
-    gp.element_set_number = omm_typed_value(lookup("ELEMENT_SET_NO"), "ELEMENT_SET_NO");
-
-    // Inclination [degs]
-    gp.inclination = omm_typed_value(lookup("INCLINATION"), "INCLINATION");
-
-    // Right ascension of ascending node [degs]
-    gp.right_ascension_of_ascending_node =
-        omm_typed_value(lookup("RA_OF_ASC_NODE"), "RA_OF_ASC_NODE");
-
-    // Eccentricity
-    gp.eccentricity = omm_typed_value(lookup("ECCENTRICITY"), "ECCENTRICITY");
-
-    // Argument of perigee [degs]
-    gp.argument_of_perigee = omm_typed_value(lookup("ARG_OF_PERICENTER"), "ARG_OF_PERICENTER");
-
-    // Mean anomaly [degs]
-    gp.mean_anomaly = omm_typed_value(lookup("MEAN_ANOMALY"), "MEAN_ANOMALY");
-
-    // Mean motion [revs/day]
-    gp.mean_motion = omm_typed_value(lookup("MEAN_MOTION"), "MEAN_MOTION");
-
-    // Revolution number at epoch
-    gp.revolution_number_at_epoch = omm_typed_value(lookup("REV_AT_EPOCH"), "REV_AT_EPOCH");
+    // Create a General Perturbation Element Set struct
+    let gp = GenPerturbElementSet {
+        common_name: omm_typed_value(lookup("OBJECT_NAME"), "OBJECT_NAME"),
+        satellite_catalog_number: omm_typed_value(lookup("NORAD_CAT_ID"), "NORAD_CAT_ID"),
+        classification: omm_typed_value(lookup("CLASSIFICATION_TYPE"), "CLASSIFICATION_TYPE"),
+        international_designator: omm_typed_value(lookup("OBJECT_ID"), "OBJECT_ID"),
+        epoch_datetime: omm_typed_value(lookup("EPOCH"), "EPOCH"),
+        first_derivative_of_mean_motion: omm_typed_value::<f64>(
+            lookup("MEAN_MOTION_DOT"),
+            "MEAN_MOTION_DOT",
+        ) * 2.0,
+        second_derivative_of_mean_motion: omm_typed_value::<f64>(
+            lookup("MEAN_MOTION_DDOT"),
+            "MEAN_MOTION_DDOT",
+        ) * 6.0,
+        bstar: omm_typed_value(lookup("BSTAR"), "BSTAR"),
+        ephemeris_type: omm_typed_value(lookup("EPHEMERIS_TYPE"), "EPHEMERIS_TYPE"),
+        element_set_number: omm_typed_value(lookup("ELEMENT_SET_NO"), "ELEMENT_SET_NO"),
+        inclination: omm_typed_value(lookup("INCLINATION"), "INCLINATION"),
+        right_ascension_of_ascending_node: omm_typed_value(
+            lookup("RA_OF_ASC_NODE"),
+            "RA_OF_ASC_NODE",
+        ),
+        eccentricity: omm_typed_value(lookup("ECCENTRICITY"), "ECCENTRICITY"),
+        argument_of_perigee: omm_typed_value(lookup("ARG_OF_PERICENTER"), "ARG_OF_PERICENTER"),
+        mean_anomaly: omm_typed_value(lookup("MEAN_ANOMALY"), "MEAN_ANOMALY"),
+        mean_motion: omm_typed_value(lookup("MEAN_MOTION"), "MEAN_MOTION"),
+        revolution_number_at_epoch: omm_typed_value(lookup("REV_AT_EPOCH"), "REV_AT_EPOCH"),
+    };
 
     // Initialize the SGP4 parameters
-    let sgp4 = init_sgp4(&gp, None);
-
-    return sgp4;
+    init_sgp4(&gp, None)
 }
 
 /// Clean a KVN value string
@@ -1485,7 +1434,7 @@ fn clean_kvn_value(value: &str) -> String {
         v = v[..idx].trim();
     }
 
-    return v.to_string();
+    v.to_string()
 }
 
 /// Format one CCSDS KVN keyword and value line
@@ -1523,7 +1472,7 @@ fn trim_decimal_zeros(value: &str) -> String {
     if trimmed.ends_with('.') {
         return trimmed.trim_end_matches('.').to_string();
     }
-    return trimmed.to_string();
+    trimmed.to_string()
 }
 
 /// Strip a leading zero before a decimal point
@@ -1543,7 +1492,7 @@ fn strip_leading_decimal_zero(value: &str) -> String {
     if let Some(rest) = value.strip_prefix("0.") {
         return format!(".{}", rest);
     }
-    return value.to_string();
+    value.to_string()
 }
 
 /// Format an OMM decimal number
@@ -1563,7 +1512,7 @@ fn format_omm_decimal(value: f64) -> String {
     }
 
     let rounded = (value * 1e12).round() / 1e12;
-    return strip_leading_decimal_zero(&trim_decimal_zeros(&format!("{:.12}", rounded)));
+    strip_leading_decimal_zero(&trim_decimal_zeros(&format!("{:.12}", rounded)))
 }
 
 /// Format an OMM scientific-notation number
@@ -1612,7 +1561,7 @@ fn format_omm_sci(value: f64) -> String {
     }
 
     let exp_sign = if exp >= 0 { "+" } else { "-" };
-    return format!("{}.{}E{}{}", sign, frac, exp_sign, exp.abs());
+    format!("{}.{}E{}{}", sign, frac, exp_sign, exp.abs())
 }
 
 /// Format an OMM EPOCH string from a UTC datetime
@@ -1633,10 +1582,10 @@ fn format_omm_epoch(epoch: &DateTime) -> String {
         second = 59.999999;
     }
 
-    return format!(
+    format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:09.6}",
         epoch.year, epoch.month, epoch.day, epoch.hour, epoch.minute, second
-    );
+    )
 }
 
 /// Format a classification character for OMM export
@@ -1652,7 +1601,7 @@ fn format_omm_classification(classification: char) -> String {
     if classification.is_ascii_graphic() {
         return classification.to_string();
     }
-    return "U".to_string();
+    "U".to_string()
 }
 
 /// Build one OMM KVN record from a general perturbation element set
@@ -1671,88 +1620,51 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
     let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
 
-    let mut lines: Vec<String> = Vec::new();
-
-    // Header
-    lines.push(format_kvn_line("CCSDS_OMM_VERS", "2.0"));
-    lines.push(format_kvn_line("CREATION_DATE", ""));
-    lines.push(format_kvn_line("ORIGINATOR", ""));
-    lines.push(String::new());
-
-    // Metadata
-    lines.push(format_kvn_line("OBJECT_NAME", &gp.common_name));
-    lines.push(format_kvn_line("OBJECT_ID", &gp.international_designator));
-    lines.push(format_kvn_line("CENTER_NAME", "EARTH"));
-    lines.push(format_kvn_line("REF_FRAME", "TEME"));
-    lines.push(format_kvn_line("TIME_SYSTEM", "UTC"));
-    lines.push(format_kvn_line("MEAN_ELEMENT_THEORY", "SGP/SGP4"));
-    lines.push(String::new());
-
-    // Mean elements
-    lines.push(format_kvn_line(
-        "EPOCH",
-        &format_omm_epoch(&gp.epoch_datetime),
-    ));
-    lines.push(format_kvn_line(
-        "MEAN_MOTION",
-        &format_omm_decimal(gp.mean_motion),
-    ));
-    lines.push(format_kvn_line(
-        "ECCENTRICITY",
-        &format_omm_decimal(gp.eccentricity),
-    ));
-    lines.push(format_kvn_line(
-        "INCLINATION",
-        &format_omm_decimal(gp.inclination),
-    ));
-    lines.push(format_kvn_line(
-        "RA_OF_ASC_NODE",
-        &format_omm_decimal(gp.right_ascension_of_ascending_node),
-    ));
-    lines.push(format_kvn_line(
-        "ARG_OF_PERICENTER",
-        &format_omm_decimal(gp.argument_of_perigee),
-    ));
-    lines.push(format_kvn_line(
-        "MEAN_ANOMALY",
-        &format_omm_decimal(gp.mean_anomaly),
-    ));
-    lines.push(String::new());
-
-    // TLE / SGP4 parameters
-    lines.push(format_kvn_line(
-        "EPHEMERIS_TYPE",
-        &gp.ephemeris_type.to_string(),
-    ));
-    lines.push(format_kvn_line(
-        "CLASSIFICATION_TYPE",
-        &format_omm_classification(gp.classification),
-    ));
-    lines.push(format_kvn_line(
-        "NORAD_CAT_ID",
-        &gp.satellite_catalog_number.to_string(),
-    ));
-    lines.push(format_kvn_line(
-        "ELEMENT_SET_NO",
-        &gp.element_set_number.to_string(),
-    ));
-    lines.push(format_kvn_line(
-        "REV_AT_EPOCH",
-        &gp.revolution_number_at_epoch.to_string(),
-    ));
-    lines.push(format_kvn_line("BSTAR", &format_omm_sci(gp.bstar)));
-    lines.push(format_kvn_line(
-        "MEAN_MOTION_DOT",
-        &format_omm_sci(mean_motion_dot),
-    ));
-    lines.push(format_kvn_line(
-        "MEAN_MOTION_DDOT",
-        &format_omm_sci(mean_motion_ddot),
-    ));
-
-    // Trailing newline so concatenated records split on CCSDS_OMM_VERS
-    lines.push(String::new());
-    return lines.join("\n");
+    vec![
+        // Header
+        format_kvn_line("CCSDS_OMM_VERS", "2.0"),
+        format_kvn_line("CREATION_DATE", ""),
+        format_kvn_line("ORIGINATOR", ""),
+        String::new(),
+        // Metadata
+        format_kvn_line("OBJECT_NAME", &gp.common_name),
+        format_kvn_line("OBJECT_ID", &gp.international_designator),
+        format_kvn_line("CENTER_NAME", "EARTH"),
+        format_kvn_line("REF_FRAME", "TEME"),
+        format_kvn_line("TIME_SYSTEM", "UTC"),
+        format_kvn_line("MEAN_ELEMENT_THEORY", "SGP/SGP4"),
+        String::new(),
+        // Mean elements
+        format_kvn_line("EPOCH", &format_omm_epoch(&gp.epoch_datetime)),
+        format_kvn_line("MEAN_MOTION", &format_omm_decimal(gp.mean_motion)),
+        format_kvn_line("ECCENTRICITY", &format_omm_decimal(gp.eccentricity)),
+        format_kvn_line("INCLINATION", &format_omm_decimal(gp.inclination)),
+        format_kvn_line(
+            "RA_OF_ASC_NODE",
+            &format_omm_decimal(gp.right_ascension_of_ascending_node),
+        ),
+        format_kvn_line(
+            "ARG_OF_PERICENTER",
+            &format_omm_decimal(gp.argument_of_perigee),
+        ),
+        format_kvn_line("MEAN_ANOMALY", &format_omm_decimal(gp.mean_anomaly)),
+        String::new(),
+        // TLE / SGP4 parameters
+        format_kvn_line("EPHEMERIS_TYPE", &gp.ephemeris_type.to_string()),
+        format_kvn_line(
+            "CLASSIFICATION_TYPE",
+            &format_omm_classification(gp.classification),
+        ),
+        format_kvn_line("NORAD_CAT_ID", &gp.satellite_catalog_number.to_string()),
+        format_kvn_line("ELEMENT_SET_NO", &gp.element_set_number.to_string()),
+        format_kvn_line("REV_AT_EPOCH", &gp.revolution_number_at_epoch.to_string()),
+        format_kvn_line("BSTAR", &format_omm_sci(gp.bstar)),
+        format_kvn_line("MEAN_MOTION_DOT", &format_omm_sci(mean_motion_dot)),
+        format_kvn_line("MEAN_MOTION_DDOT", &format_omm_sci(mean_motion_ddot)),
+        // Trailing newline so concatenated records split on CCSDS_OMM_VERS
+        String::new(),
+    ]
+    .join("\n")
 }
 
 /// Builds a CCSDS KVN OMM string from a slice of [`Sgp4`] structs.
@@ -1814,7 +1726,7 @@ pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
         records.push_str(&gp_to_omm_kvn(&sgp4.gp));
     }
 
-    return records;
+    records
 }
 
 /// Writes a CCSDS KVN OMM file from a slice of [`Sgp4`] structs.
@@ -1889,7 +1801,7 @@ fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
         fields.insert(name.to_ascii_uppercase(), text.to_string());
     }
 
-    return fields;
+    fields
 }
 
 /// Builds a vector of [`Sgp4`] structs from a string containing Orbit Mean-Elements Message
@@ -1978,7 +1890,7 @@ pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
     }
 
     // Return vector of SGP4 structs
-    return sgp4s;
+    sgp4s
 }
 
 /// Builds a vector of [`Sgp4`] structs from a file containing Orbit Mean-Elements Message
@@ -2023,10 +1935,7 @@ pub fn from_omm_xml_file(omm_xml_file_path: &str) -> Vec<Sgp4> {
     let omm_xml_string = fs::read_to_string(omm_xml_file_path).expect("Cannot read OMM XML file");
 
     // Parse OMM string into a vector of SGP4 structs
-    let sgp4s = from_omm_xml_string(&omm_xml_string);
-
-    // Return the vector of SGP4 structs
-    return sgp4s;
+    from_omm_xml_string(&omm_xml_string)
 }
 
 /// Escape text for inclusion in an XML element
@@ -2052,7 +1961,7 @@ fn escape_xml_text(value: &str) -> String {
             _ => escaped.push(c),
         }
     }
-    return escaped;
+    escaped
 }
 
 /// Format one XML element from a keyword and value
@@ -2163,7 +2072,7 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
     ));
     xml.push_str("</tleParameters></data></segment></body></omm>\n");
 
-    return xml;
+    xml
 }
 
 /// Builds a CCSDS XML OMM string from a slice of [`Sgp4`] structs.
@@ -2242,7 +2151,7 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
     }
     xml.push_str("</ndm>\n");
 
-    return xml;
+    xml
 }
 
 /// Writes a CCSDS XML OMM file from a slice of [`Sgp4`] structs.
@@ -2299,7 +2208,7 @@ pub fn to_omm_xml_file(sgp4s: &[Sgp4], omm_xml_file_path: &str) {
 #[cfg(feature = "json")]
 fn sgp4_from_json_record(record: &Value) -> Sgp4 {
     let fields = json_omm_fields(record);
-    return sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned());
+    sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned())
 }
 
 /// Builds a vector of [`Sgp4`] structs from a string containing Orbit Mean-Elements Message
@@ -2383,7 +2292,7 @@ pub fn from_omm_json_string(omm_json_string: &str) -> Vec<Sgp4> {
     }
 
     // Return vector of SGP4 structs
-    return sgp4s;
+    sgp4s
 }
 
 /// Collect OMM keyword values from one JSON object
@@ -2423,7 +2332,7 @@ fn json_omm_fields(record: &Value) -> HashMap<String, String> {
         fields.insert(key.to_ascii_uppercase(), text);
     }
 
-    return fields;
+    fields
 }
 
 /// Builds a vector of [`Sgp4`] structs from a file containing Orbit Mean-Elements Message
@@ -2466,14 +2375,11 @@ fn json_omm_fields(record: &Value) -> HashMap<String, String> {
 #[cfg(feature = "json")]
 pub fn from_omm_json_file(omm_json_file_path: &str) -> Vec<Sgp4> {
     // Open the OMM JSON file
-    let omm_json_string = fs::read_to_string(omm_json_file_path)
-        .expect("Cannot read OMM JSON file");
+    let omm_json_string =
+        fs::read_to_string(omm_json_file_path).expect("Cannot read OMM JSON file");
 
     // Parse OMM string into a vector of SGP4 structs
-    let sgp4s = from_omm_json_string(&omm_json_string);
-
-    // Return the vector of SGP4 structs
-    return sgp4s;
+    from_omm_json_string(&omm_json_string)
 }
 
 /// Format an OMM number as a JSON numeric literal
@@ -2560,10 +2466,7 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
             "        \"CLASSIFICATION_TYPE\": {}",
             serde_json::to_string(&format_omm_classification(gp.classification)).unwrap()
         ),
-        format!(
-            "        \"NORAD_CAT_ID\": {}",
-            gp.satellite_catalog_number
-        ),
+        format!("        \"NORAD_CAT_ID\": {}", gp.satellite_catalog_number),
         format!("        \"ELEMENT_SET_NO\": {}", gp.element_set_number),
         format!(
             "        \"REV_AT_EPOCH\": {}",
@@ -2580,7 +2483,7 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
         ),
     ];
 
-    return format!("    {{\n{}\n    }}", fields.join(",\n"));
+    format!("    {{\n{}\n    }}", fields.join(",\n"))
 }
 
 /// Builds a Celestrak-style JSON OMM string from a slice of [`Sgp4`] structs.
@@ -2652,7 +2555,7 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
         objects.push(gp_to_omm_json(&sgp4.gp));
     }
 
-    return format!("[\n{}\n]\n", objects.join(",\n"));
+    format!("[\n{}\n]\n", objects.join(",\n"))
 }
 
 /// Writes a Celestrak-style JSON OMM file from a slice of [`Sgp4`] structs.
@@ -2709,7 +2612,7 @@ pub fn to_omm_json_file(sgp4s: &[Sgp4], omm_json_file_path: &str) {
 #[cfg(feature = "csv")]
 fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Sgp4 {
     let fields = csv_omm_fields(headers, record);
-    return sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned());
+    sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned())
 }
 
 /// Builds a vector of [`Sgp4`] structs from a string containing Orbit Mean-Elements Message
@@ -2778,7 +2681,7 @@ pub fn from_omm_csv_string(omm_csv_string: &str) -> Vec<Sgp4> {
     }
 
     // Return vector of SGP4 structs
-    return sgp4s;
+    sgp4s
 }
 
 /// Collect OMM keyword values from one CSV row
@@ -2805,7 +2708,7 @@ fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<Str
         fields.insert(header.clone(), text);
     }
 
-    return fields;
+    fields
 }
 
 /// Builds a vector of [`Sgp4`] structs from a file containing Orbit Mean-Elements Message
@@ -2847,14 +2750,10 @@ fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<Str
 #[cfg(feature = "csv")]
 pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Vec<Sgp4> {
     // Open the OMM CSV file
-    let omm_csv_string = fs::read_to_string(omm_csv_file_path)
-        .expect("Cannot read OMM CSV file");
+    let omm_csv_string = fs::read_to_string(omm_csv_file_path).expect("Cannot read OMM CSV file");
 
     // Parse OMM string into a vector of SGP4 structs
-    let sgp4s = from_omm_csv_string(&omm_csv_string);
-
-    // Return the vector of SGP4 structs
-    return sgp4s;
+    from_omm_csv_string(&omm_csv_string)
 }
 
 /// Celestrak GP CSV column order
@@ -2896,7 +2795,7 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
     let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
 
-    return [
+    [
         gp.common_name.clone(),
         gp.international_designator.clone(),
         format_omm_epoch(&gp.epoch_datetime),
@@ -2914,7 +2813,7 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
         format_omm_sci(gp.bstar),
         format_omm_sci(mean_motion_dot),
         format_omm_sci(mean_motion_ddot),
-    ];
+    ]
 }
 
 /// Builds a Celestrak-style CSV OMM string from a slice of [`Sgp4`] structs.
@@ -2966,12 +2865,12 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
         .expect("Cannot write OMM CSV");
     for sgp4 in sgp4s {
         writer
-            .write_record(&gp_to_omm_csv_row(&sgp4.gp))
+            .write_record(gp_to_omm_csv_row(&sgp4.gp))
             .expect("Cannot write OMM CSV");
     }
 
     let bytes = writer.into_inner().expect("Cannot write OMM CSV");
-    return String::from_utf8(bytes).expect("Cannot write OMM CSV");
+    String::from_utf8(bytes).expect("Cannot write OMM CSV")
 }
 
 /// Writes a Celestrak-style CSV OMM file from a slice of [`Sgp4`] structs.
@@ -3069,7 +2968,7 @@ fn parse_omm_epoch(epoch: &str) -> DateTime {
     });
     let second = f64::from_omm("EPOCH second", time_parts[2]);
 
-    return DateTime {
+    DateTime {
         year,
         month,
         day,
@@ -3077,7 +2976,7 @@ fn parse_omm_epoch(epoch: &str) -> DateTime {
         minute,
         second,
         timezone: Timezone::UTC,
-    };
+    }
 }
 
 // ----------
