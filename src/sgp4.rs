@@ -598,15 +598,14 @@ pub fn init_atm_effects(
     // Determine parameter s based on perigee height
     let rp = brouwer0.a * (1. - brouwer0.e); // Radius of perigee [Earth Radii]
     let hp = (rp - 1.) * wgs.r_earth_eq; // Perigee height [km]
-
-    let s: f64; // [Earth radii]
-    if hp >= 156. {
-        s = (78. + wgs.r_earth_eq) / wgs.r_earth_eq;
+ 
+    let s: f64 = if hp >= 156. {
+        (78. + wgs.r_earth_eq) / wgs.r_earth_eq 
     } else if hp >= 98. {
-        s = (hp - 78. + wgs.r_earth_eq) / wgs.r_earth_eq; // [Earth radii]
+        (hp - 78. + wgs.r_earth_eq) / wgs.r_earth_eq 
     } else {
-        s = (20. + wgs.r_earth_eq) / wgs.r_earth_eq; // [Earth radii]
-    }
+        (20. + wgs.r_earth_eq) / wgs.r_earth_eq 
+    }; // [Earth radii]
 
     // Calculate atmospheric drag parameters
     let zeta = 1. / (brouwer0.a - s);
@@ -1552,14 +1551,13 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
 
     // Account for remaining atmospheric drag effects
     let a: f64;
-    let il_atm: f64;
-    if sgp4.deep_space || sgp4.atm_params.hp < 220. {
+    let il_atm: f64 = if sgp4.deep_space || sgp4.atm_params.hp < 220. {
         e += -sgp4.gp.bstar * (sgp4.atm_params.c4 * delta_t);
         let a_1 = 1. - sgp4.atm_params.c1 * delta_t; // Drop quadratic term, different from Hoots et al 2004
         a = (sgp4.wgs.ke / n).powf(2. / 3.) * a_1.powi(2);
         n = sgp4.wgs.ke / a.powf(1.5);
         let il_1 = 3. / 2. * sgp4.atm_params.c1 * delta_t.powi(2);
-        il_atm = sgp4.brouwer0.n * (il_1);
+        sgp4.brouwer0.n * il_1
     } else {
         e += -sgp4.gp.bstar
             * (sgp4.atm_params.c4 * delta_t
@@ -1581,8 +1579,8 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
                 + 30. * sgp4.atm_params.c1.powi(2) * sgp4.atm_params.d2
                 + 15. * sgp4.atm_params.c1.powi(4))
             * delta_t.powi(5);
-        il_atm = sgp4.brouwer0.n * (il_1 + il_2 + il_3 + il_4);
-    }
+        sgp4.brouwer0.n * (il_1 + il_2 + il_3 + il_4)
+    };
 
     // Mean eccentricity check before the near-zero floor (Vallado)
     if !(-0.001..1.0).contains(&e) {
