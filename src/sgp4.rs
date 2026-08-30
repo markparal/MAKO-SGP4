@@ -430,15 +430,21 @@ const RPTIM: f64 = 4.375_269_088_011_3e-3;
 /// * [`Sgp4`] - The time-independent parameters for the SGP4 propagator
 ///
 /// # Examples
-/// ```rust,ignore
-/// // Define General Perturbation (GP) Element Set
-/// let gp = GenPerturbElementSet::default();
+/// ```rust
+/// use mako_sgp4::common::WGS72;
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::init_sgp4;
 ///
-/// // Define WGS model
-/// let wgs = WGS72;
+/// // Parse a TLE to obtain a General Perturbation (GP) Element Set
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let parsed = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
 ///
-/// // Initialize the SGP4 propagator
-/// let sgp4 = init_sgp4(&gp, Some(&wgs));
+/// // Initialize the SGP4 propagator (None uses WGS-72)
+/// let sgp4 = init_sgp4(&parsed.gp, Some(&WGS72));
+/// assert!(!sgp4.deep_space);
+/// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
 /// ```
 ///
 /// # References
@@ -574,12 +580,19 @@ pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Sgp4 {
 /// * `AtmDragParams` - The atmospheric drag parameters
 ///
 /// # Examples
-/// ```rust,ignore
-/// // Define WGS model
-/// let wgs = WGS72;
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::init_atm_effects;
+///
+/// // Parse a TLE and initialize SGP4 to obtain epoch Brouwer elements
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
 ///
 /// // Initialize the atmospheric drag effects
-/// let atm_params = init_atm_effects(&wgs, &gp, &brouwer0);
+/// let atm_params = init_atm_effects(&sgp4.wgs, &sgp4.gp, &sgp4.brouwer0);
+/// assert!(atm_params.hp > 300.0);
 /// ```
 ///
 /// # References
@@ -692,12 +705,20 @@ pub fn init_atm_effects(
 /// * `EarthZonalParams` - The Earth zonal harmonics parameters
 ///
 /// # Examples
-/// ```rust,ignore
-/// // Define Brouwer mean elements at epoch
-/// let brouwer0 = BrouwerMeanElements::default();
+/// ```rust
+/// use mako_sgp4::common::WGS72;
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::init_zonal_effects;
+///
+/// // Parse a TLE and initialize SGP4 to obtain epoch Brouwer elements
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
 ///
 /// // Initialize the Earth zonal harmonics effects
-/// let zonal_params = init_zonal_effects(&WGS72, &brouwer0);
+/// let zonal_params = init_zonal_effects(&WGS72, &sgp4.brouwer0);
+/// assert!(zonal_params.raan_dot.is_finite());
 /// ```
 ///
 /// # References
@@ -754,12 +775,27 @@ pub fn init_zonal_effects(wgs: &Wgs, brouwer0: &BrouwerMeanElements) -> EarthZon
 /// * `(ThirdBodyParams, ThirdBodyParams)` - The Lunar and Solar third body parameters
 ///
 /// # Examples
-/// ```rust,ignore
-/// // Define Brouwer mean elements at epoch
-/// let brouwer0 = BrouwerMeanElements::default();
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::init_lunar_solar_effects;
 ///
-/// // Initialize the Lunar and Solar third body effects
-/// let (lunar_params, solar_params) = init_lunar_solar_effects(true, jd0, jdfrac0, &brouwer0);
+/// // Parse a TLE and initialize SGP4 to obtain epoch Brouwer elements
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
+///
+/// // Near-Earth satellites skip lunar/solar initialization
+/// let (lunar_near, solar_near) =
+///     init_lunar_solar_effects(false, sgp4.jd0, sgp4.jdfrac0, &sgp4.brouwer0);
+/// assert_eq!(lunar_near.n, 0.0);
+/// assert_eq!(solar_near.n, 0.0);
+///
+/// // Deep-space satellites receive Sun/Moon secular rates
+/// let (lunar_deep, solar_deep) =
+///     init_lunar_solar_effects(true, sgp4.jd0, sgp4.jdfrac0, &sgp4.brouwer0);
+/// assert!(lunar_deep.n > 0.0);
+/// assert!(solar_deep.n > 0.0);
 /// ```
 ///
 /// # References
@@ -923,23 +959,32 @@ pub fn init_lunar_solar_effects(
 /// * `ThirdBodyParams` - Secular rates and frozen geometric coefficients (`x*`, `z*`)
 ///
 /// # Examples
-/// ```rust,ignore
-/// let brouwer0 = BrouwerMeanElements::default();
-/// let lunar_params = calc_lunar_solar_secular_rates(
-///     &ThirdBodyParams {
-///         cos_i: cos_i_m,
-///         sin_i: sin_i_m,
-///         e: e_m,
-///         n: n_m,
-///         cos_omega: cos_omega_m,
-///         sin_omega: sin_omega_m,
-///         raan: raan_m,
-///         m: m_m,
-///         c: c_m,
-///         ..Default::default()
-///     },
-///     &brouwer0,
-/// );
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::{ThirdBodyParams, calc_lunar_solar_secular_rates};
+///
+/// // Parse a TLE and initialize SGP4 to obtain epoch Brouwer elements
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
+///
+/// // Solar geometry at epoch (SDP4 constants)
+/// let solar = ThirdBodyParams {
+///     cos_i: 0.91744867,
+///     sin_i: 0.39785416,
+///     e: 0.01675,
+///     n: 1.19459e-5,
+///     cos_omega: 0.1945905,
+///     sin_omega: -0.98088458,
+///     raan: 0.0,
+///     m: 6.2565837,
+///     c: 2.9864797e-6,
+///     ..Default::default()
+/// };
+///
+/// let solar_params = calc_lunar_solar_secular_rates(&solar, &sgp4.brouwer0);
+/// assert!(solar_params.m_dot.is_finite());
 /// ```
 ///
 /// # References
@@ -1064,27 +1109,26 @@ pub fn calc_lunar_solar_secular_rates(
 /// * `HalfDayResonanceParams` - The half day resonance parameters
 ///
 /// # Examples
-/// ```rust,ignore
-/// // Define Brouwer mean elements at epoch
-/// let brouwer0 = BrouwerMeanElements::default();
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::init_earth_gravity_resonance_halfday;
 ///
-/// // Define Earth zonal harmonics parameters
-/// let zonal_params = EarthZonalParams::default();
-///
-/// // Define Lunar third body parameters
-/// let lunar_params = ThirdBodyParams::default();
-///
-/// // Define Solar third body parameters
-/// let solar_params = ThirdBodyParams::default();
-///
-/// // Define Julian date at epoch
-/// let jd0 = 2451545.0;
-///
-/// // Define fractional Julian date at epoch
-/// let jdfrac0 = 0.0;
+/// // Parse a TLE and initialize SGP4 to obtain epoch elements and rates
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
 ///
 /// // Initialize half day resonance effects
-/// let half_day_resonance_params = init_earth_gravity_resonance_halfday(jd0, jdfrac0, &brouwer0, &zonal_params, &lunar_params, &solar_params);
+/// let half_day_resonance_params = init_earth_gravity_resonance_halfday(
+///     sgp4.jd0,
+///     sgp4.jdfrac0,
+///     &sgp4.brouwer0,
+///     &sgp4.zonal_params,
+///     &sgp4.lunar_params,
+///     &sgp4.solar_params,
+/// );
+/// assert!(half_day_resonance_params.lam0.is_finite());
 /// ```
 ///
 /// # References
@@ -1246,27 +1290,26 @@ pub fn init_earth_gravity_resonance_halfday(
 /// * `WholeDayResonanceParams` - The whole day resonance parameters
 ///
 /// # Examples
-/// ```rust,ignore
-/// // Define Brouwer mean elements at epoch
-/// let brouwer0 = BrouwerMeanElements::default();
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::init_earth_gravity_resonance_wholeday;
 ///
-/// // Define Earth zonal harmonics parameters
-/// let zonal_params = EarthZonalParams::default();
-///
-/// // Define Lunar third body parameters
-/// let lunar_params = ThirdBodyParams::default();
-///
-/// // Define Solar third body parameters
-/// let solar_params = ThirdBodyParams::default();
-///
-/// // Define Julian date at epoch
-/// let jd0 = 2451545.0;
-///
-/// // Define fractional Julian date at epoch
-/// let jdfrac0 = 0.0;
+/// // Parse a TLE and initialize SGP4 to obtain epoch elements and rates
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
 ///
 /// // Initialize whole day resonance effects
-/// let whole_day_resonance_params = init_earth_gravity_resonance_wholeday(jd0, jdfrac0, &brouwer0, &zonal_params, &lunar_params, &solar_params);
+/// let whole_day_resonance_params = init_earth_gravity_resonance_wholeday(
+///     sgp4.jd0,
+///     sgp4.jdfrac0,
+///     &sgp4.brouwer0,
+///     &sgp4.zonal_params,
+///     &sgp4.lunar_params,
+///     &sgp4.solar_params,
+/// );
+/// assert!(whole_day_resonance_params.lam0.is_finite());
 /// ```
 ///
 /// # References
@@ -1345,8 +1388,13 @@ pub fn init_earth_gravity_resonance_wholeday(
 /// * `theta_g` - GMST \[rad\], wrapped to \[0, 2π)
 ///
 /// # Examples
-/// ```rust,ignore
-/// let theta_g = calc_theta_g(jd0, jdfrac0);
+/// ```rust
+/// use std::f64::consts::PI;
+/// use mako_sgp4::sgp4::calc_theta_g;
+///
+/// // Greenwich sidereal time at J2000.0
+/// let theta_g = calc_theta_g(2451545.0, 0.0);
+/// assert!(theta_g >= 0.0 && theta_g < 2.0 * PI);
 /// ```
 ///
 /// # References
@@ -1381,8 +1429,21 @@ pub fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// * If `datetime` is not UTC or Julian-day conversion fails
 ///
 /// # Examples
-/// ```rust,ignore
-/// let state_vector = sgp4_prop_datetime(&sgp4, &datetime);
+/// ```rust
+/// use mako_sgp4::common::CoordinateFrame;
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::sgp4_prop_datetime;
+///
+/// // Parse a TLE and initialize the SGP4 propagator
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
+///
+/// // Propagate to the TLE epoch
+/// let state_vector = sgp4_prop_datetime(&sgp4, &sgp4.gp.epoch_datetime);
+/// assert_eq!(state_vector.coordinate_frame, CoordinateFrame::TEME);
+/// assert!(state_vector.r_x.is_finite());
 /// ```
 ///
 /// # References
@@ -1393,8 +1454,9 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector {
     // Convert datetime to Julian day format
     let (jd_prop, jdfrac_prop) = utc2jday(datetime).unwrap();
 
-    // Get minutes since epoch
-    let delta_t = (jd_prop + jdfrac_prop - (sgp4.jd0 + sgp4.jdfrac0)) * 1440.;
+    // Get minutes since epoch. Subtract whole days and day-fractions separately
+    // to avoid floating-point rounding errors
+    let delta_t = ((jd_prop - sgp4.jd0) + (jdfrac_prop - sgp4.jdfrac0)) * 1440.;
 
     // Propagate the state vector
     sgp4_prop_delta(sgp4, delta_t)
@@ -1418,8 +1480,21 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector {
 /// * If intermediate orbital elements become non-physical during propagation
 ///
 /// # Examples
-/// ```rust,ignore
-/// let state_vector = sgp4_prop_delta(&sgp4, 360.0); // +6 hours
+/// ```rust
+/// use mako_sgp4::common::CoordinateFrame;
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::sgp4_prop_delta;
+///
+/// // Parse a TLE and initialize the SGP4 propagator
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
+///
+/// // Propagate 6 hours past epoch
+/// let state_vector = sgp4_prop_delta(&sgp4, 360.0);
+/// assert_eq!(state_vector.coordinate_frame, CoordinateFrame::TEME);
+/// assert!(state_vector.r_x.is_finite());
 /// ```
 ///
 /// # References
@@ -1844,18 +1919,27 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
 /// * `ni_ddot` - The 2nd derivative of the mean motion at time i+1
 ///
 /// # Examples
-/// ```rust,ignore
-/// // Define auxilary variable at time i
-/// let lami = 0.0;
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::half_day_euler_maclaurin_step;
 ///
-/// // Define mean motion at time i
-/// let ni = 0.0;
+/// // Parse a TLE and initialize SGP4 to obtain resonance parameters
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
 ///
-/// // Define half day resonance parameters
-/// let half_day_resonance_params = HalfDayResonanceParams::default();
-///
-/// // Calculate the auxilary variable and mean motion at time i+1
-/// let (lami_dot, ni_dot, lami_ddot, ni_ddot) = half_day_euler_maclaurin_step(lami, ni, omegai, &half_day_resonance_params);
+/// // Evaluate one Euler-Maclaurin step at epoch
+/// let (lami_dot, ni_dot, lami_ddot, ni_ddot) = half_day_euler_maclaurin_step(
+///     sgp4.half_day_resonance_params.lam0,
+///     sgp4.brouwer0.n,
+///     sgp4.brouwer0.omega,
+///     &sgp4.half_day_resonance_params,
+/// );
+/// assert!(lami_dot.is_finite());
+/// assert!(ni_dot.is_finite());
+/// assert!(lami_ddot.is_finite());
+/// assert!(ni_ddot.is_finite());
 /// ```
 ///
 /// # References
@@ -1945,18 +2029,26 @@ pub fn half_day_euler_maclaurin_step(
 /// * `ni_ddot` - The 2nd derivative of the mean motion at time i+1
 ///
 /// # Examples
-/// ```rust,ignore
-/// // Define auxilary variable at time i
-/// let lami = 0.0;
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+/// use mako_sgp4::sgp4::whole_day_euler_maclaurin_step;
 ///
-/// // Define mean motion at time i
-/// let ni = 0.0;
+/// // Parse a TLE and initialize SGP4 to obtain resonance parameters
+/// let tle_line0 = "ISS (ZARYA)";
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
 ///
-/// // Define whole day resonance parameters
-/// let whole_day_resonance_params = WholeDayResonanceParams::default();
-///
-/// // Calculate the auxilary variable and mean motion at time i+1
-/// let (lami_dot, ni_dot, lami_ddot, ni_ddot) = whole_day_euler_maclaurin_step(lami, ni, &whole_day_resonance_params);
+/// // Evaluate one Euler-Maclaurin step at epoch
+/// let (lami_dot, ni_dot, lami_ddot, ni_ddot) = whole_day_euler_maclaurin_step(
+///     sgp4.whole_day_resonance_params.lam0,
+///     sgp4.brouwer0.n,
+///     &sgp4.whole_day_resonance_params,
+/// );
+/// assert!(lami_dot.is_finite());
+/// assert!(ni_dot.is_finite());
+/// assert!(lami_ddot.is_finite());
+/// assert!(ni_ddot.is_finite());
 /// ```
 ///
 /// # References
@@ -2003,6 +2095,7 @@ pub fn whole_day_euler_maclaurin_step(
 mod tests {
     use super::*;
     use crate::gp::from_tle_string;
+    use crate::time::Timezone;
     use serde::Deserialize;
     use std::collections::HashMap;
     use toml::from_str;
@@ -2034,7 +2127,8 @@ mod tests {
         exception: bool,
     }
 
-    /// One ephemeris row: time since epoch [min], TEME position [km], velocity [km/s].
+    /// One ephemeris row: time since epoch [min], TEME position [km], velocity [km/s],
+    /// and the UTC calendar time (Vallado stamp, or the TLE epoch when the stamp is absent).
     struct EphemRow {
         t_mins: f64,
         rx: f64,
@@ -2043,11 +2137,46 @@ mod tests {
         vx: f64,
         vy: f64,
         vz: f64,
+        datetime: DateTime,
+    }
+
+    /// Parse the optional Vallado UTC stamp after the 7 state columns.
+    ///
+    /// Stamps look like `2000  6 28  0:50:19.733571`. Fortran-style spacing can
+    /// split the time across tokens (`10:20: 1.494254`, `9: 0: 0.000282`).
+    fn parse_vallado_datetime(cols: &[&str]) -> Option<DateTime> {
+        if cols.len() < 11 {
+            return None;
+        }
+
+        let year = cols[7].parse().ok()?;
+        let month = cols[8].parse().ok()?;
+        let day = cols[9].parse().ok()?;
+        let time_str = cols[10..].join(" ");
+        let parts: Vec<&str> = time_str
+            .split(':')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect();
+        if parts.len() != 3 {
+            return None;
+        }
+
+        Some(DateTime {
+            year,
+            month,
+            day,
+            hour: parts[0].parse().ok()?,
+            minute: parts[1].parse().ok()?,
+            second: parts[2].parse().ok()?,
+            timezone: Timezone::UTC,
+        })
     }
 
     /// Parse the whitespace-delimited Vallado ephem block into rows.
     /// Lines are `t_mins rx ry rz vx vy vz` with an optional trailing calendar stamp.
-    fn parse_vallado_ephem(ephem: &str) -> Vec<EphemRow> {
+    /// Rows without a stamp use `epoch` (the TLE epoch, typically `t_mins = 0`).
+    fn parse_vallado_ephem(ephem: &str, epoch: DateTime) -> Vec<EphemRow> {
         ephem
             .lines()
             .filter_map(|line| {
@@ -2055,6 +2184,13 @@ mod tests {
                 if cols.len() < 7 {
                     return None;
                 }
+                let datetime = if cols.len() >= 11 {
+                    parse_vallado_datetime(&cols).unwrap_or_else(|| {
+                        panic!("failed to parse Vallado calendar stamp: {line}");
+                    })
+                } else {
+                    epoch
+                };
                 Some(EphemRow {
                     t_mins: cols[0].parse().ok()?,
                     rx: cols[1].parse().ok()?,
@@ -2063,9 +2199,35 @@ mod tests {
                     vx: cols[4].parse().ok()?,
                     vy: cols[5].parse().ok()?,
                     vz: cols[6].parse().ok()?,
+                    datetime,
                 })
             })
             .collect()
+    }
+
+    /// Shift a parsed UTC stamp so it represents exactly `t_mins` after epoch.
+    ///
+    /// Vallado prints calendar time with limited precision. The reference state
+    /// is at exact `t_mins`, so a few tens of microseconds in the stamp is enough
+    /// to miss 1 m on a near-decay orbit. The stamp must still be within 1 ms of
+    /// `t_mins` or the row is treated as a parse error.
+    fn align_datetime_to_t_mins(
+        datetime: DateTime,
+        jd0: f64,
+        jdfrac0: f64,
+        t_mins: f64,
+    ) -> DateTime {
+        let (jd, jdfrac) = utc2jday(&datetime).expect("propagation datetime must be UTC");
+        let recovered_mins = ((jd - jd0) + (jdfrac - jdfrac0)) * 1440.0;
+        let delta_mins = t_mins - recovered_mins;
+        assert!(
+            delta_mins.abs() * 60.0 < 1.0e-3,
+            "Vallado UTC stamp is more than 1 ms from t_mins={t_mins} (recovered {recovered_mins})"
+        );
+        DateTime {
+            second: datetime.second + delta_mins * 60.0,
+            ..datetime
+        }
     }
 
     /// Sub-meter agreement with Vallado reference ephemerides [km] / [km/s].
@@ -2114,10 +2276,63 @@ mod tests {
             assert!(!sgp4s.is_empty(), "case {key}: TLE failed to parse");
             let sgp4 = &sgp4s[0];
 
-            for row in parse_vallado_ephem(&case.ephem) {
-                let state = sgp4_prop_delta(sgp4, row.t_mins);
-                assert_state_near(key, &case.name, row.t_mins, &state, &row);
+            for row in parse_vallado_ephem(&case.ephem, sgp4.gp.epoch_datetime) {
+                // Propagate using the delta time
+                let state_delta = sgp4_prop_delta(sgp4, row.t_mins);
+                assert_state_near(key, &case.name, row.t_mins, &state_delta, &row);
+
+                // Propagate using the datetime. Align the printed stamp to t_mins
+                // so the datetime path is checked at the same instant as the
+                // reference ephemeris
+                let datetime =
+                    align_datetime_to_t_mins(row.datetime, sgp4.jd0, sgp4.jdfrac0, row.t_mins);
+                let state_datetime = sgp4_prop_datetime(sgp4, &datetime);
+                assert_state_near(key, &case.name, row.t_mins, &state_datetime, &row);
             }
         }
+    }
+
+    #[test]
+    fn test_parse_vallado_datetime() {
+        let epoch = DateTime {
+            year: 2000,
+            month: 1,
+            day: 1,
+            hour: 0,
+            minute: 0,
+            second: 0.0,
+            timezone: Timezone::UTC,
+        };
+        let compact = "     360.00000000   -7154.03120202   -3783.17682504   -3536.19412294  4.741887409 -4.151817765 -2.093935425    2000  6 28  0:50:19.733571";
+        let spaced_seconds = "0.0 8827.0 -41223.0 3.63 3.00 0.64 0.00 2004 2 9 10:20: 1.494254";
+        let spaced_hms =
+            "1844040.0 -31652.0 -66335.0 12774.0 1.71 1.91 -0.60 2009 7 2 9: 0: 0.000282";
+        let no_stamp = "       0.00000000    7022.46529266   -1400.08296755       0.03995155  1.893841015  6.405893759  4.534807250";
+
+        let compact_row = &parse_vallado_ephem(compact, epoch)[0];
+        let compact_dt = compact_row.datetime;
+        assert_eq!(compact_dt.year, 2000);
+        assert_eq!(compact_dt.month, 6);
+        assert_eq!(compact_dt.day, 28);
+        assert_eq!(compact_dt.hour, 0);
+        assert_eq!(compact_dt.minute, 50);
+        assert!((compact_dt.second - 19.733571).abs() < 1e-9);
+        assert_eq!(compact_dt.timezone, Timezone::UTC);
+
+        let spaced_row = &parse_vallado_ephem(spaced_seconds, epoch)[0];
+        let spaced_dt = spaced_row.datetime;
+        assert_eq!(spaced_dt.hour, 10);
+        assert_eq!(spaced_dt.minute, 20);
+        assert!((spaced_dt.second - 1.494254).abs() < 1e-9);
+
+        let hms_row = &parse_vallado_ephem(spaced_hms, epoch)[0];
+        let hms_dt = hms_row.datetime;
+        assert_eq!(hms_dt.year, 2009);
+        assert_eq!(hms_dt.hour, 9);
+        assert_eq!(hms_dt.minute, 0);
+        assert!((hms_dt.second - 0.000282).abs() < 1e-12);
+
+        let epoch_row = &parse_vallado_ephem(no_stamp, epoch)[0];
+        assert_eq!(epoch_row.datetime, epoch);
     }
 }
