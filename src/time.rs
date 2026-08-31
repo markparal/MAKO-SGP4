@@ -22,16 +22,23 @@
 /// ```rust
 /// use mako_sgp4::time::{DateTime, Timezone};
 ///
+/// // Define a UTC datetime (required by Julian-date conversions)
 /// let datetime = DateTime {
-///     year: 2024,
+///     year: 2000,
 ///     month: 1,
-///     day: 15,
+///     day: 1,
 ///     hour: 12,
-///     minute: 30,
-///     second: 45.5,
+///     minute: 0,
+///     second: 0.0,
 ///     timezone: Timezone::UTC,
 /// };
+///
+/// // Assert the calendar components
+/// assert_eq!(datetime.year, 2000);
+/// assert_eq!(datetime.timezone, Timezone::UTC);
 /// ```
+///
+/// # References
 #[derive(Default, Debug, Clone, PartialEq, Copy)]
 pub struct DateTime {
     /// The year
@@ -49,7 +56,7 @@ pub struct DateTime {
     /// The minute (0-59)
     pub minute: i32,
 
-    /// The second with fractional component (0.0–59.999…)
+    /// The second with fractional component (0.0-59.999...)
     pub second: f64,
 
     /// The timezone associated with this datetime
@@ -66,11 +73,25 @@ pub struct DateTime {
 ///
 /// # Examples
 /// ```rust
-/// use mako_sgp4::time::DateError;
+/// use mako_sgp4::time::{DateError, DateTime, Timezone, utc2jday};
 ///
-/// let err = DateError::DateNotUTC;
+/// // Julian conversion requires UTC
+/// let datetime = DateTime {
+///     year: 2000,
+///     month: 1,
+///     day: 1,
+///     hour: 12,
+///     minute: 0,
+///     second: 0.0,
+///     timezone: Timezone::UT1,
+/// };
+///
+/// // Assert the non-UTC error
+/// let err = utc2jday(&datetime).unwrap_err();
 /// assert_eq!(err, DateError::DateNotUTC);
 /// ```
+///
+/// # References
 #[derive(Debug, Clone, PartialEq)]
 pub enum DateError {
     /// The provided date is before October 10th, 1582 (Gregorian calendar adoption)
@@ -91,15 +112,21 @@ pub enum DateError {
 /// ```rust
 /// use mako_sgp4::time::Timezone;
 ///
+/// // UTC is the default and the time scale used by GP / SGP4
 /// let tz_utc = Timezone::UTC;
 /// let tz_ut1 = Timezone::UT1;
+///
+/// assert_eq!(tz_utc, Timezone::default());
+/// assert_ne!(tz_utc, tz_ut1);
 /// ```
+///
+/// # References
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Timezone {
     /// Coordinated Universal Time (UTC)
     ///
     /// UTC is the primary time standard by which the world regulates clocks and time.
-    /// It is within about 1 second of mean solar time at 0° longitude.
+    /// It is within about 1 second of mean solar time at 0 deg longitude.
     #[default]
     UTC,
 
@@ -110,6 +137,10 @@ pub enum Timezone {
     /// UT1 differs from UTC by up to 0.9 seconds due to variations in Earth's rotation.
     UT1,
 }
+
+// ------
+// Traits
+// ------
 
 // ---------
 // Constants
@@ -141,19 +172,23 @@ pub enum Timezone {
 /// use mako_sgp4::time::utc2jday;
 /// use mako_sgp4::time::{DateTime, Timezone};
 ///
+/// // Define J2000.0: 2000-01-01 12:00:00 UTC
 /// let datetime = DateTime {
-///     year: 2024,
+///     year: 2000,
 ///     month: 1,
-///     day: 15,
+///     day: 1,
 ///     hour: 12,
-///     minute: 30,
-///     second: 45.5,
+///     minute: 0,
+///     second: 0.0,
 ///     timezone: Timezone::UTC,
 /// };
 ///
+/// // Convert to Julian date (integer day and day fraction)
 /// let (jd, jdfrac) = utc2jday(&datetime).unwrap();
-/// let jd_total = jd + jdfrac;
-/// assert!(jd_total > 2_460_000.0);
+///
+/// // Assert JD 2451545.0
+/// assert!(((jd + jdfrac) - 2_451_545.0).abs() < 1e-8);
+/// assert!((0.0..1.0).contains(&jdfrac));
 /// ```
 ///
 /// # References
@@ -198,19 +233,23 @@ pub fn utc2jday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
 /// use mako_sgp4::time::utc2mjday;
 /// use mako_sgp4::time::{DateTime, Timezone};
 ///
+/// // Define J2000.0: 2000-01-01 12:00:00 UTC
 /// let datetime = DateTime {
-///     year: 2024,
+///     year: 2000,
 ///     month: 1,
-///     day: 15,
+///     day: 1,
 ///     hour: 12,
-///     minute: 30,
-///     second: 45.5,
+///     minute: 0,
+///     second: 0.0,
 ///     timezone: Timezone::UTC,
 /// };
 ///
+/// // Convert to Modified Julian date (MJD = JD - 2400000.5)
 /// let (mjd, mjdfrac) = utc2mjday(&datetime).unwrap();
-/// let mjd_total = mjd + mjdfrac;
-/// assert!(mjd_total > 60_000.0);
+///
+/// // Assert MJD 51544.5
+/// assert!(((mjd + mjdfrac) - 51_544.5).abs() < 1e-8);
+/// assert!((0.0..1.0).contains(&mjdfrac));
 /// ```
 ///
 /// # References
@@ -284,12 +323,17 @@ pub fn utc2mjday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
 ///
 /// # Examples
 /// ```rust
-/// use mako_sgp4::time::dayofyr2utc;
+/// use mako_sgp4::time::{Timezone, dayofyr2utc};
 ///
-/// // Day 123.5 of 2024 = May 2nd, 2024 at 12:00:00
+/// // Define a TLE-style epoch: day 123.5 of 2024 is May 2 at 12:00:00 UTC
 /// let datetime = dayofyr2utc(2024, 123.5).unwrap();
+///
+/// // Assert the calendar date, noon, and UTC
+/// assert_eq!(datetime.year, 2024);
 /// assert_eq!(datetime.month, 5);
 /// assert_eq!(datetime.day, 2);
+/// assert_eq!(datetime.hour, 12);
+/// assert_eq!(datetime.timezone, Timezone::UTC);
 /// ```
 ///
 /// # References

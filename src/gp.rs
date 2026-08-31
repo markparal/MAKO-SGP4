@@ -37,6 +37,21 @@ use crate::time::{DateTime, Timezone, dayofyr2utc};
 /// SGP4 propagator. Elements are commonly distributed as Two-Line Elements (TLEs) or Orbit
 /// Mean-Elements Messages (OMMs).
 ///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+///
+/// // Parse a TLE; the GP element set is stored on the SGP4 struct
+/// let line0 = "ISS (ZARYA)";
+/// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+///
+/// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
+/// assert_eq!(sgp4.gp.common_name, "ISS (ZARYA)");
+/// assert!((sgp4.gp.inclination - 51.6416).abs() < 1e-4);
+/// ```
+///
 /// # References
 /// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
 #[derive(Default, Clone)]
@@ -106,6 +121,27 @@ pub struct GenPerturbElementSet {
 /// Used by KVN and XML OMM parsing to turn a present field string into String,
 /// char, integer, floating-point, or DateTime values, and to supply defaults
 /// when a field is missing or empty.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_omm_kvn_string;
+///
+/// // OMM numbers may use Fortran D exponents; missing classification is U
+/// let omm = "\
+/// CCSDS_OMM_VERS = 2.0
+/// EPOCH          = 2026-06-14T15:07:48.259488
+/// MEAN_MOTION    = 15.11169557
+/// INCLINATION    = 97.5103
+/// NORAD_CAT_ID   = 69097
+/// BSTAR          = .39221734D-3
+/// ";
+/// let sgp4 = &from_omm_kvn_string(omm)[0];
+///
+/// // Assert typed field conversion and the unclassified default
+/// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4.gp.classification, 'U');
+/// assert!((sgp4.gp.bstar - 0.00039221734).abs() < 1e-12);
+/// ```
 trait FromOmm: Sized {
     /// Default used when the OMM field is missing or empty
     fn omm_default() -> Self;
@@ -185,6 +221,34 @@ impl FromOmm for DateTime {
 // Constants
 // ---------
 
+/// Celestrak GP CSV column order
+///
+/// Header names written by [`to_omm_csv_string`] and [`to_omm_csv_file`],
+/// matching Celestrak GP CSV.
+///
+/// # References
+/// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "csv")]
+const OMM_CSV_HEADERS: [&str; 17] = [
+    "OBJECT_NAME",
+    "OBJECT_ID",
+    "EPOCH",
+    "MEAN_MOTION",
+    "ECCENTRICITY",
+    "INCLINATION",
+    "RA_OF_ASC_NODE",
+    "ARG_OF_PERICENTER",
+    "MEAN_ANOMALY",
+    "EPHEMERIS_TYPE",
+    "CLASSIFICATION_TYPE",
+    "NORAD_CAT_ID",
+    "ELEMENT_SET_NO",
+    "REV_AT_EPOCH",
+    "BSTAR",
+    "MEAN_MOTION_DOT",
+    "MEAN_MOTION_DDOT",
+];
+
 // ---------
 // Functions
 // ---------
@@ -202,20 +266,28 @@ impl FromOmm for DateTime {
 /// # Returns
 /// * [`Sgp4`] - Struct containing the parsed SGP4 parameters.
 ///
+/// # Panics
+/// * If the optional name line is empty or longer than 24 characters
+/// * If TLE line 1 or line 2 is not 69 characters
+/// * If a TLE field cannot be parsed
+/// * If the epoch cannot be converted to a UTC datetime
+/// * If SGP4 initialization fails
+///
 /// # Examples
 /// ```rust
 /// use mako_sgp4::gp::from_tle_lines;
 ///
-/// // Define the TLE lines
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// // Define a 3-line TLE (optional name, then line 1 and line 2)
+/// let line0 = "ISS (ZARYA)";
+/// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
 ///
-/// // Parse the TLE lines into a SGP4 struct
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
+/// // Parse the TLE lines into an SGP4 propagator
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
 ///
-/// // Assert the TLE struct is correct
+/// // Assert the catalog number and name
 /// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
+/// assert_eq!(sgp4.gp.common_name, "ISS (ZARYA)");
 /// ```
 ///
 /// # References
@@ -389,19 +461,27 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Sgp4 {
 /// # Returns
 /// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 parameters
 ///
+/// # Panics
+/// * If a TLE in the string cannot be parsed (see [`from_tle_lines`])
+///
 /// # Examples
 /// ```rust
 /// use mako_sgp4::gp::from_tle_string;
 ///
-/// // Define the TLE string
-/// let tle_string = "ISS (ZARYA)\n1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921\n2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// // Define one or more 2-line or 3-line TLEs, separated by newlines
+/// let tle = "\
+/// ISS (ZARYA)
+/// 1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+/// 2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+/// ";
 ///
-/// // Parse the TLE string into a SGP4 struct
-/// let sgp4s = from_tle_string(tle_string);
-/// let sgp4 = &sgp4s[0];
+/// // Parse the TLE string into SGP4 propagators
+/// let sgp4s = from_tle_string(tle);
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 25544);
+/// assert_eq!(sgp4s[0].gp.common_name, "ISS (ZARYA)");
 /// ```
 ///
 /// # References
@@ -465,19 +545,35 @@ pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
 /// # Returns
 /// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 structs.
 ///
+/// # Panics
+/// * If the file cannot be read
+/// * If a TLE in the file cannot be parsed (see [`from_tle_lines`])
+///
 /// # Examples
 /// ```rust
 /// use mako_sgp4::gp::from_tle_file;
 ///
-/// // Define the TLE file path
-/// let tle_file_path = "test/tle_parsing_cases.txt";
+/// // Define a 3-line TLE
+/// let tle = "\
+/// ISS (ZARYA)
+/// 1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+/// 2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+/// ";
 ///
-/// // Parse the TLE file into a vector of SGP4 structs
-/// let sgp4s = from_tle_file(tle_file_path);
-/// let sgp4 = &sgp4s[0];
+/// // Write the TLE to a temporary file
+/// let path = std::env::temp_dir().join("mako_sgp4_from_tle_file.tle");
+/// std::fs::write(&path, tle).unwrap();
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
+/// // Parse the TLE file into SGP4 propagators
+/// let sgp4s = from_tle_file(path.to_str().unwrap());
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 25544);
+/// assert_eq!(sgp4s[0].gp.common_name, "ISS (ZARYA)");
 /// ```
 ///
 /// # References
@@ -501,26 +597,9 @@ pub fn from_tle_file(file_path: &str) -> Vec<Sgp4> {
 /// # Arguments
 /// * `line` - The TLE line to calculate the checksum of
 ///
-/// # Panics
-/// * If the TLE line is invalid (must be 69 characters)
-///
 /// # Returns
 /// * `checksum` - The checksum of the TLE line (integer 0-9)
-///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::calc_checksum;
-///
-/// // Define the TLE line
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-///
-/// // Calculate the checksum of the TLE line
-/// let checksum = calc_checksum(tle_line1);
-///
-/// // Assert the checksum is correct
-/// assert_eq!(checksum, 1);
-/// ```
-pub fn calc_checksum(line: &str) -> i32 {
+fn calc_checksum(line: &str) -> i32 {
     // Initialize checksum to 0
     let mut checksum = 0;
 
@@ -549,20 +628,10 @@ pub fn calc_checksum(line: &str) -> i32 {
 /// # Returns
 /// * `bool` - True if the checksum of the line is valid, false if otherwise
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::tle_checksum;
-///
-/// // Define the TLE line
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-///
-/// // Calculate the checksum of the TLE line
-/// let checksum = tle_checksum(tle_line1);
-///
-/// // Assert the checksum is correct
-/// assert_eq!(checksum, true);
-/// ```
-pub fn tle_checksum(line: &str) -> bool {
+/// # Panics
+/// * If the line is shorter than 69 characters
+/// * If the last character is not a digit
+fn tle_checksum(line: &str) -> bool {
     // Calculate the checksum of the line
     let checksum = calc_checksum(line);
 
@@ -580,6 +649,19 @@ pub fn tle_checksum(line: &str) -> bool {
 ///
 /// # Returns
 /// * Four-digit year in the range 1957-2056
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+///
+/// // Two-digit TLE year 08 maps to 2008 (00-56 -> 2000-2056)
+/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, None);
+///
+/// // Assert the epoch year is the four-digit Gregorian year
+/// assert_eq!(sgp4.gp.epoch_datetime.year, 2008);
+/// ```
 fn tle_full_year(two_digit_year: i32) -> i32 {
     if two_digit_year < 57 {
         2000 + two_digit_year
@@ -599,23 +681,9 @@ fn tle_full_year(two_digit_year: i32) -> i32 {
 /// * `Some(i)` - The integer value of the character
 /// * `None` - If the character is not a valid Alpha-5 digit
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::alpha5_digit;
-///
-/// // Define the character
-/// let c = 'A';
-///
-/// // Convert the character to an integer
-/// let i = alpha5_digit(c);
-///
-/// // Assert the integer is correct
-/// assert_eq!(i, Some(10));
-/// ```
-///
 /// # References
 /// - [Alpha-5 Standard](https://www.space-track.org/documentation#tle-alpha5)
-pub fn alpha5_digit(c: char) -> Option<i32> {
+fn alpha5_digit(c: char) -> Option<i32> {
     // Convert the character to uppercase to match the standard
     let c_upper = c.to_ascii_uppercase();
 
@@ -1035,20 +1103,22 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> String {
 /// ```rust
 /// use mako_sgp4::gp::{from_tle_string, to_tle_string};
 ///
-/// // Define the TLE string
+/// // Define a 3-line TLE
 /// let tle = "\
 /// ISS (ZARYA)
 /// 1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
 /// 2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
 /// ";
 ///
-/// // Export the parsed element sets back to TLE
+/// // Parse, export, and parse again
 /// let sgp4s = from_tle_string(tle);
 /// let exported = to_tle_string(&sgp4s);
 /// let reparsed = from_tle_string(&exported);
 ///
-/// // Assert the round-trip catalog number is unchanged
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 25544);
+/// assert_eq!(reparsed[0].gp.common_name, "ISS (ZARYA)");
 /// ```
 ///
 /// # References
@@ -1078,19 +1148,31 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> String {
 ///
 /// # Examples
 /// ```rust
-/// use mako_sgp4::gp::{from_tle_file, to_tle_file};
+/// use mako_sgp4::gp::{from_tle_file, from_tle_string, to_tle_file};
 ///
-/// // Parse the TLE test file
-/// let sgp4s = from_tle_file("test/tle_parsing_cases.txt");
+/// // Define a 3-line TLE and parse it
+/// let tle = "\
+/// ISS (ZARYA)
+/// 1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+/// 2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+/// ";
+/// let sgp4s = from_tle_string(tle);
 ///
-/// // Write the element sets to test/export
-/// std::fs::create_dir_all("test/export").expect("could not create test/export");
-/// let out_path = "test/export/tle.txt";
-/// to_tle_file(&sgp4s, out_path);
+/// // Write the element sets to a temporary TLE file
+/// let path = std::env::temp_dir().join("mako_sgp4_to_tle_file.tle");
+/// let path_str = path.to_str().unwrap();
+/// to_tle_file(&sgp4s, path_str);
 ///
-/// // Parse the written file and assert the catalog number
-/// let reparsed = from_tle_file(out_path);
+/// // Parse the written file
+/// let reparsed = from_tle_file(path_str);
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 25544);
+/// assert_eq!(reparsed[0].gp.common_name, "ISS (ZARYA)");
 /// ```
 ///
 /// # References
@@ -1122,7 +1204,7 @@ pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) {
 /// ```rust
 /// use mako_sgp4::gp::from_omm_kvn_lines;
 ///
-/// // Define the OMM KVN lines
+/// // Define one OMM record as key-value lines (missing fields use defaults)
 /// let omm = "\
 /// OBJECT_NAME    = 2026-106A
 /// OBJECT_ID      = 2026-106A
@@ -1138,13 +1220,16 @@ pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) {
 /// MEAN_MOTION_DOT = .6535E-4
 /// MEAN_MOTION_DDOT = 0
 /// ";
+///
+/// // Split the record into trimmed, non-empty lines
 /// let lines: Vec<&str> = omm.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
 ///
-/// // Parse the OMM lines into a SGP4 struct
+/// // Parse the OMM lines into an SGP4 propagator
 /// let sgp4 = from_omm_kvn_lines(&lines);
 ///
-/// // Assert the SGP4 struct is correct
+/// // Assert the catalog number and name
 /// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4.gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -1175,7 +1260,7 @@ pub fn from_omm_kvn_lines(lines: &[&str]) -> Sgp4 {
 /// ```rust
 /// use mako_sgp4::gp::from_omm_kvn_string;
 ///
-/// // Define the OMM KVN string
+/// // Define an OMM KVN record. Concatenated records start at each CCSDS_OMM_VERS line
 /// let omm = "\
 /// CCSDS_OMM_VERS = 2.0
 /// OBJECT_NAME    = 2026-106A
@@ -1197,12 +1282,13 @@ pub fn from_omm_kvn_lines(lines: &[&str]) -> Sgp4 {
 /// MEAN_MOTION_DDOT = 0
 /// ";
 ///
-/// // Parse the OMM string into a SGP4 struct
+/// // Parse the OMM string into SGP4 propagators
 /// let sgp4s = from_omm_kvn_string(omm);
-/// let sgp4 = &sgp4s[0];
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4s[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -1261,15 +1347,38 @@ pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
 /// ```rust
 /// use mako_sgp4::gp::from_omm_kvn_file;
 ///
-/// // Define the OMM KVN file path
-/// let omm_kvn_file_path = "test/omm_parsing_cases.txt";
+/// // Define an OMM KVN record
+/// let omm = "\
+/// CCSDS_OMM_VERS = 2.0
+/// OBJECT_NAME    = 2026-106A
+/// OBJECT_ID      = 2026-106A
+/// EPOCH          = 2026-06-14T15:07:48.259488
+/// MEAN_MOTION    = 15.11169557
+/// ECCENTRICITY   = .00147468
+/// INCLINATION    = 97.5103
+/// RA_OF_ASC_NODE = 247.7605
+/// ARG_OF_PERICENTER = 169.6213
+/// MEAN_ANOMALY   = 190.5325
+/// NORAD_CAT_ID   = 69097
+/// BSTAR          = .39221734E-3
+/// MEAN_MOTION_DOT = .6535E-4
+/// MEAN_MOTION_DDOT = 0
+/// ";
 ///
-/// // Parse the OMM file into a vector of SGP4 structs
-/// let sgp4s = from_omm_kvn_file(omm_kvn_file_path);
-/// let sgp4 = &sgp4s[0];
+/// // Write the OMM to a temporary file
+/// let path = std::env::temp_dir().join("mako_sgp4_from_omm_kvn_file.txt");
+/// std::fs::write(&path, omm).unwrap();
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// // Parse the OMM file into SGP4 propagators
+/// let sgp4s = from_omm_kvn_file(path.to_str().unwrap());
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4s[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -1688,7 +1797,7 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
 /// ```rust
 /// use mako_sgp4::gp::{from_omm_kvn_string, to_omm_kvn_string};
 ///
-/// // Define the OMM KVN string
+/// // Define an OMM KVN record
 /// let omm = "\
 /// CCSDS_OMM_VERS = 2.0
 /// OBJECT_NAME    = 2026-106A
@@ -1706,13 +1815,15 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
 /// MEAN_MOTION_DDOT = 0
 /// ";
 ///
-/// // Export the parsed element sets back to KVN
+/// // Parse, export, and parse again
 /// let sgp4s = from_omm_kvn_string(omm);
 /// let exported = to_omm_kvn_string(&sgp4s);
 /// let reparsed = from_omm_kvn_string(&exported);
 ///
-/// // Assert the round-trip catalog number is unchanged
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(reparsed[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -1743,19 +1854,42 @@ pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
 ///
 /// # Examples
 /// ```rust
-/// use mako_sgp4::gp::{from_omm_kvn_file, to_omm_kvn_file};
+/// use mako_sgp4::gp::{from_omm_kvn_file, from_omm_kvn_string, to_omm_kvn_file};
 ///
-/// // Parse the OMM KVN test file
-/// let sgp4s = from_omm_kvn_file("test/omm_parsing_cases.txt");
+/// // Define an OMM KVN record and parse it
+/// let omm = "\
+/// CCSDS_OMM_VERS = 2.0
+/// OBJECT_NAME    = 2026-106A
+/// OBJECT_ID      = 2026-106A
+/// EPOCH          = 2026-06-14T15:07:48.259488
+/// MEAN_MOTION    = 15.11169557
+/// ECCENTRICITY   = .00147468
+/// INCLINATION    = 97.5103
+/// RA_OF_ASC_NODE = 247.7605
+/// ARG_OF_PERICENTER = 169.6213
+/// MEAN_ANOMALY   = 190.5325
+/// NORAD_CAT_ID   = 69097
+/// BSTAR          = .39221734E-3
+/// MEAN_MOTION_DOT = .6535E-4
+/// MEAN_MOTION_DDOT = 0
+/// ";
+/// let sgp4s = from_omm_kvn_string(omm);
 ///
-/// // Write the element sets to test/export
-/// std::fs::create_dir_all("test/export").expect("could not create test/export");
-/// let out_path = "test/export/omm_kvn.txt";
-/// to_omm_kvn_file(&sgp4s, out_path);
+/// // Write the element sets to a temporary KVN file
+/// let path = std::env::temp_dir().join("mako_sgp4_to_omm_kvn_file.txt");
+/// let path_str = path.to_str().unwrap();
+/// to_omm_kvn_file(&sgp4s, path_str);
 ///
-/// // Parse the written file and assert the catalog number
-/// let reparsed = from_omm_kvn_file(out_path);
+/// // Parse the written file
+/// let reparsed = from_omm_kvn_file(path_str);
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(reparsed[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -1827,7 +1961,7 @@ fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
 /// ```rust
 /// use mako_sgp4::gp::from_omm_xml_string;
 ///
-/// // Define the OMM XML string
+/// // Define an OMM XML document with one omm record
 /// let omm = r#"<ndm>
 /// <omm id="CCSDS_OMM_VERS" version="2.0">
 /// <body><segment>
@@ -1855,12 +1989,13 @@ fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
 /// </tleParameters></data>
 /// </segment></body></omm></ndm>"#;
 ///
-/// // Parse the OMM XML into a SGP4 struct
+/// // Parse the OMM XML into SGP4 propagators
 /// let sgp4s = from_omm_xml_string(omm);
-/// let sgp4 = &sgp4s[0];
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4s[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -1914,15 +2049,44 @@ pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
 /// ```rust
 /// use mako_sgp4::gp::from_omm_xml_file;
 ///
-/// // Define the OMM XML file path
-/// let omm_xml_file_path = "test/omm_parsing_cases.xml";
+/// // Define an OMM XML document with one omm record
+/// let omm = r#"<ndm>
+/// <omm id="CCSDS_OMM_VERS" version="2.0">
+/// <body><segment>
+/// <metadata>
+/// <OBJECT_NAME>2026-106A</OBJECT_NAME>
+/// <OBJECT_ID>2026-106A</OBJECT_ID>
+/// </metadata>
+/// <data><meanElements>
+/// <EPOCH>2026-06-14T15:07:48.259488</EPOCH>
+/// <MEAN_MOTION>15.11169557</MEAN_MOTION>
+/// <ECCENTRICITY>.00147468</ECCENTRICITY>
+/// <INCLINATION>97.5103</INCLINATION>
+/// <RA_OF_ASC_NODE>247.7605</RA_OF_ASC_NODE>
+/// <ARG_OF_PERICENTER>169.6213</ARG_OF_PERICENTER>
+/// <MEAN_ANOMALY>190.5325</MEAN_ANOMALY>
+/// </meanElements><tleParameters>
+/// <NORAD_CAT_ID>69097</NORAD_CAT_ID>
+/// <BSTAR>.39221734E-3</BSTAR>
+/// <MEAN_MOTION_DOT>.6535E-4</MEAN_MOTION_DOT>
+/// <MEAN_MOTION_DDOT>0</MEAN_MOTION_DDOT>
+/// </tleParameters></data>
+/// </segment></body></omm></ndm>"#;
 ///
-/// // Parse the OMM file into a vector of SGP4 structs
-/// let sgp4s = from_omm_xml_file(omm_xml_file_path);
-/// let sgp4 = &sgp4s[0];
+/// // Write the OMM to a temporary file
+/// let path = std::env::temp_dir().join("mako_sgp4_from_omm_xml_file.xml");
+/// std::fs::write(&path, omm).unwrap();
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// // Parse the OMM file into SGP4 propagators
+/// let sgp4s = from_omm_xml_file(path.to_str().unwrap());
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4s[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2097,7 +2261,7 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
 /// ```rust
 /// use mako_sgp4::gp::{from_omm_xml_string, to_omm_xml_string};
 ///
-/// // Define the OMM XML string
+/// // Define an OMM XML document with one omm record
 /// let omm = r#"<ndm>
 /// <omm id="CCSDS_OMM_VERS" version="2.0">
 /// <body><segment>
@@ -2114,24 +2278,22 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
 /// <ARG_OF_PERICENTER>169.6213</ARG_OF_PERICENTER>
 /// <MEAN_ANOMALY>190.5325</MEAN_ANOMALY>
 /// </meanElements><tleParameters>
-/// <EPHEMERIS_TYPE>0</EPHEMERIS_TYPE>
-/// <CLASSIFICATION_TYPE>U</CLASSIFICATION_TYPE>
 /// <NORAD_CAT_ID>69097</NORAD_CAT_ID>
-/// <ELEMENT_SET_NO>999</ELEMENT_SET_NO>
-/// <REV_AT_EPOCH>459</REV_AT_EPOCH>
 /// <BSTAR>.39221734E-3</BSTAR>
 /// <MEAN_MOTION_DOT>.6535E-4</MEAN_MOTION_DOT>
 /// <MEAN_MOTION_DDOT>0</MEAN_MOTION_DDOT>
 /// </tleParameters></data>
 /// </segment></body></omm></ndm>"#;
 ///
-/// // Export the parsed element sets back to XML
+/// // Parse, export, and parse again
 /// let sgp4s = from_omm_xml_string(omm);
 /// let exported = to_omm_xml_string(&sgp4s);
 /// let reparsed = from_omm_xml_string(&exported);
 ///
-/// // Assert the round-trip catalog number is unchanged
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(reparsed[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2168,19 +2330,48 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
 ///
 /// # Examples
 /// ```rust
-/// use mako_sgp4::gp::{from_omm_xml_file, to_omm_xml_file};
+/// use mako_sgp4::gp::{from_omm_xml_file, from_omm_xml_string, to_omm_xml_file};
 ///
-/// // Parse the OMM XML test file
-/// let sgp4s = from_omm_xml_file("test/omm_parsing_cases.xml");
+/// // Define an OMM XML document and parse it
+/// let omm = r#"<ndm>
+/// <omm id="CCSDS_OMM_VERS" version="2.0">
+/// <body><segment>
+/// <metadata>
+/// <OBJECT_NAME>2026-106A</OBJECT_NAME>
+/// <OBJECT_ID>2026-106A</OBJECT_ID>
+/// </metadata>
+/// <data><meanElements>
+/// <EPOCH>2026-06-14T15:07:48.259488</EPOCH>
+/// <MEAN_MOTION>15.11169557</MEAN_MOTION>
+/// <ECCENTRICITY>.00147468</ECCENTRICITY>
+/// <INCLINATION>97.5103</INCLINATION>
+/// <RA_OF_ASC_NODE>247.7605</RA_OF_ASC_NODE>
+/// <ARG_OF_PERICENTER>169.6213</ARG_OF_PERICENTER>
+/// <MEAN_ANOMALY>190.5325</MEAN_ANOMALY>
+/// </meanElements><tleParameters>
+/// <NORAD_CAT_ID>69097</NORAD_CAT_ID>
+/// <BSTAR>.39221734E-3</BSTAR>
+/// <MEAN_MOTION_DOT>.6535E-4</MEAN_MOTION_DOT>
+/// <MEAN_MOTION_DDOT>0</MEAN_MOTION_DDOT>
+/// </tleParameters></data>
+/// </segment></body></omm></ndm>"#;
+/// let sgp4s = from_omm_xml_string(omm);
 ///
-/// // Write the element sets to test/export
-/// std::fs::create_dir_all("test/export").expect("could not create test/export");
-/// let out_path = "test/export/omm_xml.xml";
-/// to_omm_xml_file(&sgp4s, out_path);
+/// // Write the element sets to a temporary XML file
+/// let path = std::env::temp_dir().join("mako_sgp4_to_omm_xml_file.xml");
+/// let path_str = path.to_str().unwrap();
+/// to_omm_xml_file(&sgp4s, path_str);
 ///
-/// // Parse the written file and assert the catalog number
-/// let reparsed = from_omm_xml_file(out_path);
+/// // Parse the written file
+/// let reparsed = from_omm_xml_file(path_str);
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(reparsed[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2235,7 +2426,7 @@ fn sgp4_from_json_record(record: &Value) -> Sgp4 {
 /// ```rust
 /// use mako_sgp4::gp::from_omm_json_string;
 ///
-/// // Define the OMM JSON string
+/// // Define OMM JSON as an array of objects (a single object is also accepted)
 /// let omm = r#"[
 /// {
 /// "OBJECT_NAME": "2026-106A",
@@ -2258,12 +2449,13 @@ fn sgp4_from_json_record(record: &Value) -> Sgp4 {
 /// }
 /// ]"#;
 ///
-/// // Parse the OMM JSON into a SGP4 struct
+/// // Parse the OMM JSON into SGP4 propagators
 /// let sgp4s = from_omm_json_string(omm);
-/// let sgp4 = &sgp4s[0];
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4s[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2357,15 +2549,39 @@ fn json_omm_fields(record: &Value) -> HashMap<String, String> {
 /// ```rust
 /// use mako_sgp4::gp::from_omm_json_file;
 ///
-/// // Define the OMM JSON file path
-/// let omm_json_file_path = "test/omm_parsing_cases.json";
+/// // Define OMM JSON as an array of objects
+/// let omm = r#"[
+/// {
+/// "OBJECT_NAME": "2026-106A",
+/// "OBJECT_ID": "2026-106A",
+/// "EPOCH": "2026-06-14T15:07:48.259488",
+/// "MEAN_MOTION": 15.11169557,
+/// "ECCENTRICITY": 0.00147468,
+/// "INCLINATION": 97.5103,
+/// "RA_OF_ASC_NODE": 247.7605,
+/// "ARG_OF_PERICENTER": 169.6213,
+/// "MEAN_ANOMALY": 190.5325,
+/// "NORAD_CAT_ID": 69097,
+/// "BSTAR": 0.00039221734,
+/// "MEAN_MOTION_DOT": 6.535e-05,
+/// "MEAN_MOTION_DDOT": 0
+/// }
+/// ]"#;
 ///
-/// // Parse the OMM file into a vector of SGP4 structs
-/// let sgp4s = from_omm_json_file(omm_json_file_path);
-/// let sgp4 = &sgp4s[0];
+/// // Write the OMM to a temporary file
+/// let path = std::env::temp_dir().join("mako_sgp4_from_omm_json_file.json");
+/// std::fs::write(&path, omm).unwrap();
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// // Parse the OMM file into SGP4 propagators
+/// let sgp4s = from_omm_json_file(path.to_str().unwrap());
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4s[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2506,7 +2722,7 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
 /// ```rust
 /// use mako_sgp4::gp::{from_omm_json_string, to_omm_json_string};
 ///
-/// // Define the OMM JSON string
+/// // Define OMM JSON as an array of objects
 /// let omm = r#"[
 /// {
 /// "OBJECT_NAME": "2026-106A",
@@ -2518,24 +2734,22 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
 /// "RA_OF_ASC_NODE": 247.7605,
 /// "ARG_OF_PERICENTER": 169.6213,
 /// "MEAN_ANOMALY": 190.5325,
-/// "EPHEMERIS_TYPE": 0,
-/// "CLASSIFICATION_TYPE": "U",
 /// "NORAD_CAT_ID": 69097,
-/// "ELEMENT_SET_NO": 999,
-/// "REV_AT_EPOCH": 459,
 /// "BSTAR": 0.00039221734,
 /// "MEAN_MOTION_DOT": 6.535e-05,
 /// "MEAN_MOTION_DDOT": 0
 /// }
 /// ]"#;
 ///
-/// // Export the parsed element sets back to JSON
+/// // Parse, export, and parse again
 /// let sgp4s = from_omm_json_string(omm);
 /// let exported = to_omm_json_string(&sgp4s);
 /// let reparsed = from_omm_json_string(&exported);
 ///
-/// // Assert the round-trip catalog number is unchanged
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(reparsed[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2572,19 +2786,43 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
 ///
 /// # Examples
 /// ```rust
-/// use mako_sgp4::gp::{from_omm_json_file, to_omm_json_file};
+/// use mako_sgp4::gp::{from_omm_json_file, from_omm_json_string, to_omm_json_file};
 ///
-/// // Parse the OMM JSON test file
-/// let sgp4s = from_omm_json_file("test/omm_parsing_cases.json");
+/// // Define OMM JSON and parse it
+/// let omm = r#"[
+/// {
+/// "OBJECT_NAME": "2026-106A",
+/// "OBJECT_ID": "2026-106A",
+/// "EPOCH": "2026-06-14T15:07:48.259488",
+/// "MEAN_MOTION": 15.11169557,
+/// "ECCENTRICITY": 0.00147468,
+/// "INCLINATION": 97.5103,
+/// "RA_OF_ASC_NODE": 247.7605,
+/// "ARG_OF_PERICENTER": 169.6213,
+/// "MEAN_ANOMALY": 190.5325,
+/// "NORAD_CAT_ID": 69097,
+/// "BSTAR": 0.00039221734,
+/// "MEAN_MOTION_DOT": 6.535e-05,
+/// "MEAN_MOTION_DDOT": 0
+/// }
+/// ]"#;
+/// let sgp4s = from_omm_json_string(omm);
 ///
-/// // Write the element sets to test/export
-/// std::fs::create_dir_all("test/export").expect("could not create test/export");
-/// let out_path = "test/export/omm_json.json";
-/// to_omm_json_file(&sgp4s, out_path);
+/// // Write the element sets to a temporary JSON file
+/// let path = std::env::temp_dir().join("mako_sgp4_to_omm_json_file.json");
+/// let path_str = path.to_str().unwrap();
+/// to_omm_json_file(&sgp4s, path_str);
 ///
-/// // Parse the written file and assert the catalog number
-/// let reparsed = from_omm_json_file(out_path);
+/// // Parse the written file
+/// let reparsed = from_omm_json_file(path_str);
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(reparsed[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2637,18 +2875,19 @@ fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Sgp4 
 /// ```rust
 /// use mako_sgp4::gp::from_omm_csv_string;
 ///
-/// // Define the OMM CSV string
+/// // Define an OMM CSV with a header row and one data row
 /// let omm = "\
 /// OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT
 /// 2026-106A,2026-106A,2026-06-14T15:07:48.259488,15.11169557,.00147468,97.5103,247.7605,169.6213,190.5325,0,U,69097,999,459,.39221734E-3,.6535E-4,0
 /// ";
 ///
-/// // Parse the OMM CSV into a SGP4 struct
+/// // Parse the OMM CSV into SGP4 propagators
 /// let sgp4s = from_omm_csv_string(omm);
-/// let sgp4 = &sgp4s[0];
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4s[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2732,15 +2971,26 @@ fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<Str
 /// ```rust
 /// use mako_sgp4::gp::from_omm_csv_file;
 ///
-/// // Define the OMM CSV file path
-/// let omm_csv_file_path = "test/omm_parsing_cases.csv";
+/// // Define an OMM CSV with a header row and one data row
+/// let omm = "\
+/// OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,NORAD_CAT_ID,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT
+/// 2026-106A,2026-106A,2026-06-14T15:07:48.259488,15.11169557,.00147468,97.5103,247.7605,169.6213,190.5325,69097,.39221734E-3,.6535E-4,0
+/// ";
 ///
-/// // Parse the OMM file into a vector of SGP4 structs
-/// let sgp4s = from_omm_csv_file(omm_csv_file_path);
-/// let sgp4 = &sgp4s[0];
+/// // Write the OMM to a temporary file
+/// let path = std::env::temp_dir().join("mako_sgp4_from_omm_csv_file.csv");
+/// std::fs::write(&path, omm).unwrap();
 ///
-/// // Assert the SGP4 struct is correct
-/// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
+/// // Parse the OMM file into SGP4 propagators
+/// let sgp4s = from_omm_csv_file(path.to_str().unwrap());
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the catalog number and name
+/// assert_eq!(sgp4s.len(), 1);
+/// assert_eq!(sgp4s[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(sgp4s[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2755,28 +3005,6 @@ pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Vec<Sgp4> {
     // Parse OMM string into a vector of SGP4 structs
     from_omm_csv_string(&omm_csv_string)
 }
-
-/// Celestrak GP CSV column order
-#[cfg(feature = "csv")]
-const OMM_CSV_HEADERS: [&str; 17] = [
-    "OBJECT_NAME",
-    "OBJECT_ID",
-    "EPOCH",
-    "MEAN_MOTION",
-    "ECCENTRICITY",
-    "INCLINATION",
-    "RA_OF_ASC_NODE",
-    "ARG_OF_PERICENTER",
-    "MEAN_ANOMALY",
-    "EPHEMERIS_TYPE",
-    "CLASSIFICATION_TYPE",
-    "NORAD_CAT_ID",
-    "ELEMENT_SET_NO",
-    "REV_AT_EPOCH",
-    "BSTAR",
-    "MEAN_MOTION_DOT",
-    "MEAN_MOTION_DDOT",
-];
 
 /// Build one OMM CSV data row from a general perturbation element set
 ///
@@ -2837,19 +3065,21 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
 /// ```rust
 /// use mako_sgp4::gp::{from_omm_csv_string, to_omm_csv_string};
 ///
-/// // Define the OMM CSV string
+/// // Define an OMM CSV with a header row and one data row
 /// let omm = "\
 /// OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT
 /// 2026-106A,2026-106A,2026-06-14T15:07:48.259488,15.11169557,.00147468,97.5103,247.7605,169.6213,190.5325,0,U,69097,999,459,.39221734E-3,.6535E-4,0
 /// ";
 ///
-/// // Export the parsed element sets back to CSV
+/// // Parse, export, and parse again
 /// let sgp4s = from_omm_csv_string(omm);
 /// let exported = to_omm_csv_string(&sgp4s);
 /// let reparsed = from_omm_csv_string(&exported);
 ///
-/// // Assert the round-trip catalog number is unchanged
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(reparsed[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References
@@ -2887,19 +3117,30 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
 ///
 /// # Examples
 /// ```rust
-/// use mako_sgp4::gp::{from_omm_csv_file, to_omm_csv_file};
+/// use mako_sgp4::gp::{from_omm_csv_file, from_omm_csv_string, to_omm_csv_file};
 ///
-/// // Parse the OMM CSV test file
-/// let sgp4s = from_omm_csv_file("test/omm_parsing_cases.csv");
+/// // Define an OMM CSV and parse it
+/// let omm = "\
+/// OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,NORAD_CAT_ID,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT
+/// 2026-106A,2026-106A,2026-06-14T15:07:48.259488,15.11169557,.00147468,97.5103,247.7605,169.6213,190.5325,69097,.39221734E-3,.6535E-4,0
+/// ";
+/// let sgp4s = from_omm_csv_string(omm);
 ///
-/// // Write the element sets to test/export
-/// std::fs::create_dir_all("test/export").expect("could not create test/export");
-/// let out_path = "test/export/omm_csv.csv";
-/// to_omm_csv_file(&sgp4s, out_path);
+/// // Write the element sets to a temporary CSV file
+/// let path = std::env::temp_dir().join("mako_sgp4_to_omm_csv_file.csv");
+/// let path_str = path.to_str().unwrap();
+/// to_omm_csv_file(&sgp4s, path_str);
 ///
-/// // Parse the written file and assert the catalog number
-/// let reparsed = from_omm_csv_file(out_path);
+/// // Parse the written file
+/// let reparsed = from_omm_csv_file(path_str);
+///
+/// // Remove the temporary file
+/// let _ = std::fs::remove_file(&path);
+///
+/// // Assert the round-trip catalog number and name
+/// assert_eq!(reparsed.len(), 1);
 /// assert_eq!(reparsed[0].gp.satellite_catalog_number, 69097);
+/// assert_eq!(reparsed[0].gp.common_name, "2026-106A");
 /// ```
 ///
 /// # References

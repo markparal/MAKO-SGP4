@@ -132,10 +132,12 @@ Functions should follow this structure
 ///
 /// # References
 /// - [Source](link)
-fn example_function(arg1: type) -> (return1) {
+pub fn example_function(arg1: type) -> (return1) {
     // Well commented
 }
 ```
+
+Note that for all non-`pub`, the `# Examples` section is unnecessary.
 
 ## Special Characters
 Avoid including special characters in code and docstrings.

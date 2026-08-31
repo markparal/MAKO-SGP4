@@ -20,6 +20,21 @@ use crate::time::{DateTime, utc2jday};
 ///
 /// This struct contains the epoch parameters which are necessary to propagate the state vectors of a satellite with SGP4.
 ///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+///
+/// // Parse a TLE; from_tle_lines initializes SGP4 parameters
+/// let line0 = "ISS (ZARYA)";
+/// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+///
+/// // ISS is a near-Earth satellite
+/// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
+/// assert!(!sgp4.deep_space);
+/// ```
+///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
@@ -74,6 +89,21 @@ pub struct Sgp4 {
 /// This struct contains the mean orbital elements of a TLE converted to Brouwer convention. TLEs report mean orbital elements
 /// in Kozai convention.
 ///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+///
+/// // Parse a TLE to recover Brouwer mean elements
+/// let line0 = "ISS (ZARYA)";
+/// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+///
+/// // Mean motion and semi-major axis are physical
+/// assert!(sgp4.brouwer0.n > 0.0);
+/// assert!(sgp4.brouwer0.a > 1.0);
+/// ```
+///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
@@ -114,6 +144,20 @@ pub struct BrouwerMeanElements {
 /// Atmospheric Drag Effects
 ///
 /// This struct contains the parameters necessary to account for the impacts of atmospheric drag on an orbit.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+///
+/// // Parse a TLE to recover atmospheric drag parameters
+/// let line0 = "ISS (ZARYA)";
+/// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+///
+/// // Perigee height is above the Earth
+/// assert!(sgp4.atm_params.hp > 0.0);
+/// ```
 ///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
@@ -162,6 +206,21 @@ pub struct AtmDragParams {
 ///
 /// This struct contains the parameters necessary to account for the impacts of Earth's zonal harmonics on an orbit.
 ///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+///
+/// // Parse a TLE to recover Earth zonal harmonic rates
+/// let line0 = "ISS (ZARYA)";
+/// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+///
+/// // RAAN precession is non-zero for an inclined LEO
+/// assert!(sgp4.zonal_params.raan_dot.is_finite());
+/// assert!(sgp4.zonal_params.raan_dot != 0.0);
+/// ```
+///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
@@ -181,6 +240,21 @@ pub struct EarthZonalParams {
 /// Solar and Lunar 3rd Body Effects
 ///
 /// This struct contains the parameters necessary to account for the impacts of the Sun and Moon on an orbit.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+///
+/// // Parse a near-Earth TLE; third-body rates stay at the default zeros
+/// let line0 = "ISS (ZARYA)";
+/// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+///
+/// // Near-Earth satellites do not apply lunar/solar secular rates
+/// assert_eq!(sgp4.solar_params.n, 0.0);
+/// assert_eq!(sgp4.lunar_params.n, 0.0);
+/// ```
 ///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
@@ -298,6 +372,19 @@ pub struct ThirdBodyParams {
 ///
 /// This struct contains the parameters necessary to account for the impacts of half day resonance effects on an orbit.
 ///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+///
+/// // Parse a near-Earth TLE; 12-hour resonance is not applied
+/// let line0 = "ISS (ZARYA)";
+/// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+///
+/// assert!(!sgp4.half_day_resonance);
+/// ```
+///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
@@ -348,6 +435,19 @@ pub struct HalfDayResonanceParams {
 ///
 /// This struct contains the parameters necessary to account for the impacts of whole day resonance effects on an orbit.
 ///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::from_tle_lines;
+///
+/// // Parse a near-Earth TLE; 24-hour resonance is not applied
+/// let line0 = "ISS (ZARYA)";
+/// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+/// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+///
+/// assert!(!sgp4.whole_day_resonance);
+/// ```
+///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
@@ -385,6 +485,10 @@ pub struct WholeDayResonanceParams {
 // -----
 // Enums
 // -----
+
+// ------
+// Traits
+// ------
 
 // ---------
 // Constants
@@ -428,6 +532,10 @@ const RPTIM: f64 = 4.375_269_088_011_3e-3;
 ///
 /// # Returns
 /// * [`Sgp4`] - The time-independent parameters for the SGP4 propagator
+///
+/// # Panics
+/// * If the GP epoch datetime is not UTC or Julian-day conversion fails
+/// * If propagation at epoch fails because intermediate elements are non-physical
 ///
 /// # Examples
 /// ```rust
@@ -569,7 +677,7 @@ pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Sgp4 {
 /// Initialize the atmospheric drag effects
 ///
 /// Computes the power-law density constants (`q0`, `s`, `zeta`, `eta`) and the
-/// drag coefficients (`C1`–`C5`, `D2`–`D4`) used during SGP4 secular updates.
+/// drag coefficients (`C1`-`C5`, `D2`-`D4`) used during SGP4 secular updates.
 ///
 /// # Arguments
 /// * `wgs` - The WGS model
@@ -579,27 +687,11 @@ pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Sgp4 {
 /// # Returns
 /// * `AtmDragParams` - The atmospheric drag parameters
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::from_tle_lines;
-/// use mako_sgp4::sgp4::init_atm_effects;
-///
-/// // Parse a TLE and initialize SGP4 to obtain epoch Brouwer elements
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-///
-/// // Initialize the atmospheric drag effects
-/// let atm_params = init_atm_effects(&sgp4.wgs, &sgp4.gp, &sgp4.brouwer0);
-/// assert!(atm_params.hp > 300.0);
-/// ```
-///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn init_atm_effects(
+fn init_atm_effects(
     wgs: &Wgs,
     gp: &GenPerturbElementSet,
     brouwer0: &BrouwerMeanElements,
@@ -704,28 +796,11 @@ pub fn init_atm_effects(
 /// # Returns
 /// * `EarthZonalParams` - The Earth zonal harmonics parameters
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::common::WGS72;
-/// use mako_sgp4::gp::from_tle_lines;
-/// use mako_sgp4::sgp4::init_zonal_effects;
-///
-/// // Parse a TLE and initialize SGP4 to obtain epoch Brouwer elements
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-///
-/// // Initialize the Earth zonal harmonics effects
-/// let zonal_params = init_zonal_effects(&WGS72, &sgp4.brouwer0);
-/// assert!(zonal_params.raan_dot.is_finite());
-/// ```
-///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn init_zonal_effects(wgs: &Wgs, brouwer0: &BrouwerMeanElements) -> EarthZonalParams {
+fn init_zonal_effects(wgs: &Wgs, brouwer0: &BrouwerMeanElements) -> EarthZonalParams {
     // Calculate orbital element rates of change due to zonal harmonics
     let m_dot_1 = 3. * wgs.k2 * (-1. + 3. * brouwer0.theta.powi(2))
         / (2. * brouwer0.a.powi(2) * brouwer0.beta.powi(3));
@@ -761,7 +836,7 @@ pub fn init_zonal_effects(wgs: &Wgs, brouwer0: &BrouwerMeanElements) -> EarthZon
 
 /// Initialize the Lunar and Solar third body effects
 ///
-/// For deep-space satellites (period ≥ 225 min), evaluates Sun/Moon geometry at
+/// For deep-space satellites (period >= 225 min), evaluates Sun/Moon geometry at
 /// the TLE epoch and returns secular third-body rates. Near-Earth satellites
 /// receive default (zero) parameters.
 ///
@@ -774,35 +849,11 @@ pub fn init_zonal_effects(wgs: &Wgs, brouwer0: &BrouwerMeanElements) -> EarthZon
 /// # Returns
 /// * `(ThirdBodyParams, ThirdBodyParams)` - The Lunar and Solar third body parameters
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::from_tle_lines;
-/// use mako_sgp4::sgp4::init_lunar_solar_effects;
-///
-/// // Parse a TLE and initialize SGP4 to obtain epoch Brouwer elements
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-///
-/// // Near-Earth satellites skip lunar/solar initialization
-/// let (lunar_near, solar_near) =
-///     init_lunar_solar_effects(false, sgp4.jd0, sgp4.jdfrac0, &sgp4.brouwer0);
-/// assert_eq!(lunar_near.n, 0.0);
-/// assert_eq!(solar_near.n, 0.0);
-///
-/// // Deep-space satellites receive Sun/Moon secular rates
-/// let (lunar_deep, solar_deep) =
-///     init_lunar_solar_effects(true, sgp4.jd0, sgp4.jdfrac0, &sgp4.brouwer0);
-/// assert!(lunar_deep.n > 0.0);
-/// assert!(solar_deep.n > 0.0);
-/// ```
-///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn init_lunar_solar_effects(
+fn init_lunar_solar_effects(
     deep_space: bool,
     jd0: f64,
     jdfrac0: f64,
@@ -880,7 +931,7 @@ pub fn init_lunar_solar_effects(
     let cos_raan_me = raan_me.cos();
 
     // Lunar equatorial inclination (Spacetrack/Hoots legacy linearization of the
-    // ecliptic→equatorial transform — not the exact acos form)
+    // ecliptic-to-equatorial transform - not the exact acos form)
     let cos_i_m = 0.91375164 - 0.03568096 * cos_raan_me;
     let sin_i_m = (1.0 - cos_i_m * cos_i_m).sqrt();
 
@@ -958,40 +1009,11 @@ pub fn init_lunar_solar_effects(
 /// # Returns
 /// * `ThirdBodyParams` - Secular rates and frozen geometric coefficients (`x*`, `z*`)
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::from_tle_lines;
-/// use mako_sgp4::sgp4::{ThirdBodyParams, calc_lunar_solar_secular_rates};
-///
-/// // Parse a TLE and initialize SGP4 to obtain epoch Brouwer elements
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-///
-/// // Solar geometry at epoch (SDP4 constants)
-/// let solar = ThirdBodyParams {
-///     cos_i: 0.91744867,
-///     sin_i: 0.39785416,
-///     e: 0.01675,
-///     n: 1.19459e-5,
-///     cos_omega: 0.1945905,
-///     sin_omega: -0.98088458,
-///     raan: 0.0,
-///     m: 6.2565837,
-///     c: 2.9864797e-6,
-///     ..Default::default()
-/// };
-///
-/// let solar_params = calc_lunar_solar_secular_rates(&solar, &sgp4.brouwer0);
-/// assert!(solar_params.m_dot.is_finite());
-/// ```
-///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn calc_lunar_solar_secular_rates(
+fn calc_lunar_solar_secular_rates(
     body: &ThirdBodyParams,
     brouwer0: &BrouwerMeanElements,
 ) -> ThirdBodyParams {
@@ -1094,8 +1116,8 @@ pub fn calc_lunar_solar_secular_rates(
 
 /// Initialize the half day resonance effects of Earth's gravity
 ///
-/// Initializes 12-hour resonance coefficients (`d2201` … `d5433`) and the
-/// auxiliary longitude `lambda0` used by the Euler–Maclaurin deep-space integrator.
+/// Initializes 12-hour resonance coefficients (`d2201` ... `d5433`) and the
+/// auxiliary longitude `lambda0` used by the Euler-Maclaurin deep-space integrator.
 ///
 /// # Arguments
 /// * `jd0` - The Julian date at epoch \[days\]
@@ -1108,34 +1130,11 @@ pub fn calc_lunar_solar_secular_rates(
 /// # Returns
 /// * `HalfDayResonanceParams` - The half day resonance parameters
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::from_tle_lines;
-/// use mako_sgp4::sgp4::init_earth_gravity_resonance_halfday;
-///
-/// // Parse a TLE and initialize SGP4 to obtain epoch elements and rates
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-///
-/// // Initialize half day resonance effects
-/// let half_day_resonance_params = init_earth_gravity_resonance_halfday(
-///     sgp4.jd0,
-///     sgp4.jdfrac0,
-///     &sgp4.brouwer0,
-///     &sgp4.zonal_params,
-///     &sgp4.lunar_params,
-///     &sgp4.solar_params,
-/// );
-/// assert!(half_day_resonance_params.lam0.is_finite());
-/// ```
-///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn init_earth_gravity_resonance_halfday(
+fn init_earth_gravity_resonance_halfday(
     jd0: f64,
     jdfrac0: f64,
     brouwer0: &BrouwerMeanElements,
@@ -1274,8 +1273,8 @@ pub fn init_earth_gravity_resonance_halfday(
 
 /// Initialize the whole day resonance effects of Earth's gravity
 ///
-/// Initializes 24-hour resonance coefficients (`delta1`–`delta3`, `lambda31`/`lambda22`/`lambda33`)
-/// and the auxiliary longitude `lambda0` used by the Euler–Maclaurin deep-space
+/// Initializes 24-hour resonance coefficients (`delta1`-`delta3`, `lambda31`/`lambda22`/`lambda33`)
+/// and the auxiliary longitude `lambda0` used by the Euler-Maclaurin deep-space
 /// integrator.
 ///
 /// # Arguments
@@ -1289,34 +1288,11 @@ pub fn init_earth_gravity_resonance_halfday(
 /// # Returns
 /// * `WholeDayResonanceParams` - The whole day resonance parameters
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::from_tle_lines;
-/// use mako_sgp4::sgp4::init_earth_gravity_resonance_wholeday;
-///
-/// // Parse a TLE and initialize SGP4 to obtain epoch elements and rates
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-///
-/// // Initialize whole day resonance effects
-/// let whole_day_resonance_params = init_earth_gravity_resonance_wholeday(
-///     sgp4.jd0,
-///     sgp4.jdfrac0,
-///     &sgp4.brouwer0,
-///     &sgp4.zonal_params,
-///     &sgp4.lunar_params,
-///     &sgp4.solar_params,
-/// );
-/// assert!(whole_day_resonance_params.lam0.is_finite());
-/// ```
-///
 /// # References
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn init_earth_gravity_resonance_wholeday(
+fn init_earth_gravity_resonance_wholeday(
     jd0: f64,
     jdfrac0: f64,
     brouwer0: &BrouwerMeanElements,
@@ -1378,28 +1354,18 @@ pub fn init_earth_gravity_resonance_wholeday(
 
 /// Calculate Greenwich mean sidereal time (GMST) / longitude of Greenwich at a Julian date.
 ///
-/// Used as θ_g when initializing 12 h / 24 h resonance terms.
+/// Used as `theta_g` when initializing 12 h / 24 h resonance terms.
 ///
 /// # Arguments
 /// * `jd0` - Julian day (integer part) \[days\]
 /// * `jdfrac0` - Julian day fraction \[days\]
 ///
 /// # Returns
-/// * `theta_g` - GMST \[rad\], wrapped to \[0, 2π)
-///
-/// # Examples
-/// ```rust
-/// use std::f64::consts::PI;
-/// use mako_sgp4::sgp4::calc_theta_g;
-///
-/// // Greenwich sidereal time at J2000.0
-/// let theta_g = calc_theta_g(2451545.0, 0.0);
-/// assert!(theta_g >= 0.0 && theta_g < 2.0 * PI);
-/// ```
+/// * `theta_g` - GMST \[rad\], wrapped to \[0, 2 * pi)
 ///
 /// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
-pub fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
+fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
     // Calculate the Julian centuries since J2000.0
     let tut1 = (jd0 + jdfrac0 - 2451545.0) / 36525.0; // [centuries]
 
@@ -1465,8 +1431,8 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector {
 /// Propagate an initialized [`Sgp4`] model by `delta_t` minutes from the TLE epoch.
 ///
 /// Applies secular drag/zonal updates (and deep-space lunar/solar + resonance when
-/// applicable), long-period periodics, then the short-period Kepler / J₂ solution.
-/// Panics on non-physical intermediate elements (e.g. mean motion ≤ 0, eccentricity
+/// applicable), long-period periodics, then the short-period Kepler / J2 solution.
+/// Panics on non-physical intermediate elements (e.g. mean motion <= 0, eccentricity
 /// out of range, decayed radius), matching Vallado-style checks.
 ///
 /// # Arguments
@@ -1515,7 +1481,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
     let omega_df = sgp4.brouwer0.omega + sgp4.zonal_params.omega_dot * delta_t;
     let raan_df = sgp4.brouwer0.raan + sgp4.zonal_params.raan_dot * delta_t;
 
-    // Neglect delta_omega and delta_m if deep space or perigee height is less than 220 km, or e ≤ 1e-4
+    // Neglect delta_omega and delta_m if deep space or perigee height is less than 220 km, or e <= 1e-4
     let delta_omega: f64;
     let delta_m: f64;
     if sgp4.deep_space || sgp4.atm_params.hp < 220. || sgp4.brouwer0.e <= 1.0e-4 {
@@ -1551,7 +1517,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
     }
 
     // Account for the whole and half day resonance effects of Earth's gravity
-    // Vallado dspace: ±720 min Euler-Maclaurin steps (works for negative tsince)
+    // Vallado dspace: +/-720 min Euler-Maclaurin steps (works for negative tsince)
     if sgp4.half_day_resonance {
         let mut lami = sgp4.half_day_resonance_params.lam0;
         let mut ni = sgp4.brouwer0.n;
@@ -1571,7 +1537,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
         );
 
         for em_step in 0..em_steps {
-            // h²/2 term uses |720|²; linear term uses signed step (Vallado step2 = 259200)
+            // h^2/2 term uses |720|^2; linear term uses signed step (Vallado step2 = 259200)
             lami += lami_dot * step + 0.5 * lami_ddot * 518400.;
             ni += ni_dot * step + 0.5 * ni_ddot * 518400.;
 
@@ -1770,7 +1736,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
         }
     }
 
-    // Vallado keep inclination in [0, π] after lunisolar periodics
+    // Vallado keep inclination in [0, pi] after lunisolar periodics
     if sgp4.deep_space && i < 0.0 {
         i = -i;
         raan += PI;
@@ -1918,34 +1884,10 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
 /// * `lami_ddot` - The 2nd derivative of the auxilary variable at time i+1
 /// * `ni_ddot` - The 2nd derivative of the mean motion at time i+1
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::from_tle_lines;
-/// use mako_sgp4::sgp4::half_day_euler_maclaurin_step;
-///
-/// // Parse a TLE and initialize SGP4 to obtain resonance parameters
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-///
-/// // Evaluate one Euler-Maclaurin step at epoch
-/// let (lami_dot, ni_dot, lami_ddot, ni_ddot) = half_day_euler_maclaurin_step(
-///     sgp4.half_day_resonance_params.lam0,
-///     sgp4.brouwer0.n,
-///     sgp4.brouwer0.omega,
-///     &sgp4.half_day_resonance_params,
-/// );
-/// assert!(lami_dot.is_finite());
-/// assert!(ni_dot.is_finite());
-/// assert!(lami_ddot.is_finite());
-/// assert!(ni_ddot.is_finite());
-/// ```
-///
 /// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn half_day_euler_maclaurin_step(
+fn half_day_euler_maclaurin_step(
     lami: f64,
     ni: f64,
     omegai: f64,
@@ -2028,33 +1970,10 @@ pub fn half_day_euler_maclaurin_step(
 /// * `lami_ddot` - The 2nd derivative of the auxilary variable at time i+1
 /// * `ni_ddot` - The 2nd derivative of the mean motion at time i+1
 ///
-/// # Examples
-/// ```rust
-/// use mako_sgp4::gp::from_tle_lines;
-/// use mako_sgp4::sgp4::whole_day_euler_maclaurin_step;
-///
-/// // Parse a TLE and initialize SGP4 to obtain resonance parameters
-/// let tle_line0 = "ISS (ZARYA)";
-/// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
-/// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
-///
-/// // Evaluate one Euler-Maclaurin step at epoch
-/// let (lami_dot, ni_dot, lami_ddot, ni_ddot) = whole_day_euler_maclaurin_step(
-///     sgp4.whole_day_resonance_params.lam0,
-///     sgp4.brouwer0.n,
-///     &sgp4.whole_day_resonance_params,
-/// );
-/// assert!(lami_dot.is_finite());
-/// assert!(ni_dot.is_finite());
-/// assert!(lami_ddot.is_finite());
-/// assert!(ni_ddot.is_finite());
-/// ```
-///
 /// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn whole_day_euler_maclaurin_step(
+fn whole_day_euler_maclaurin_step(
     lami: f64,
     ni: f64,
     whole_day_resonance_params: &WholeDayResonanceParams,
