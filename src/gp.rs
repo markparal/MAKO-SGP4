@@ -45,7 +45,7 @@ use crate::time::{DateTime, Timezone, dayofyr2utc};
 /// let line0 = "ISS (ZARYA)";
 /// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0)).unwrap();
 ///
 /// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
 /// assert_eq!(sgp4.gp.common_name, "ISS (ZARYA)");
@@ -111,6 +111,37 @@ pub struct GenPerturbElementSet {
 // -----
 // Enums
 // -----
+
+/// GP errors
+#[derive(Debug, Clone, PartialEq)]
+pub enum GpError {
+    /// TLE line 0 is invalid
+    InvalidTleLine0,
+
+    /// TLE line 1 is invalid
+    InvalidTleLine1,
+
+    /// TLE line 2 is invalid
+    InvalidTleLine2,
+
+    /// TLE epoch is invalid
+    InvalidTleEpoch,
+
+    /// TLE line 1 and line 2 have different NORAD catalog numbers
+    MismatchedTleCatalog,
+
+    /// A TLE file could not be read
+    Io(String),
+
+    /// TLE catalog number is negative or outside the Alpha-5 range
+    InvalidTLECatalogNumber,
+
+    /// TLE epoch datetime is before 1957 or after 2056
+    InvalidTLEDateTime,
+
+    /// A TLE data line is not 68 characters before the checksum
+    InvalidTLELine,
+}
 
 // ------
 // Traits
@@ -264,13 +295,17 @@ const OMM_CSV_HEADERS: [&str; 17] = [
 /// * `line0` - Optional name line (TLE line 0)
 ///
 /// # Returns
-/// * [`Sgp4`] - Struct containing the parsed SGP4 parameters.
+/// * `Ok(Sgp4)` - Struct containing the parsed SGP4 parameters
+/// * `Err(GpError)` - If a TLE line or field cannot be parsed
+///
+/// # Errors
+/// * [`GpError::InvalidTleLine0`] - If the optional name line is empty or longer than 24 characters
+/// * [`GpError::InvalidTleLine1`] - If line 1 is not 69 characters or a field cannot be parsed
+/// * [`GpError::InvalidTleLine2`] - If line 2 is not 69 characters or a field cannot be parsed
+/// * [`GpError::InvalidTleEpoch`] - If the epoch cannot be converted to a UTC datetime
+/// * [`GpError::MismatchedTleCatalog`] - If line 1 and line 2 have different NORAD catalog numbers
 ///
 /// # Panics
-/// * If the optional name line is empty or longer than 24 characters
-/// * If TLE line 1 or line 2 is not 69 characters
-/// * If a TLE field cannot be parsed
-/// * If the epoch cannot be converted to a UTC datetime
 /// * If SGP4 initialization fails
 ///
 /// # Examples
@@ -283,7 +318,7 @@ const OMM_CSV_HEADERS: [&str; 17] = [
 /// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
 ///
 /// // Parse the TLE lines into an SGP4 propagator
-/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0)).unwrap();
 ///
 /// // Assert the catalog number and name
 /// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
@@ -292,161 +327,180 @@ const OMM_CSV_HEADERS: [&str; 17] = [
 ///
 /// # References
 /// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
-pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Sgp4 {
+pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Result<Sgp4, GpError> {
     // Create mutable General Perturbation Element Set struct
     let mut gp = GenPerturbElementSet::default();
-
-    // Validate the TLE checksum
-    if !tle_checksum(line1) || !tle_checksum(line2) {
-        eprintln!("warning: TLE checksum failed; continuing with parse");
-    }
 
     // Extract the common name of the satellite from line 0
     if let Some(name_line) = line0 {
         if name_line.is_empty() || name_line.len() > 24 {
-            panic!(
-                "TLE line 0 is invalid: name must be 1-24 characters, got {}",
-                name_line.len()
-            );
+            return Err(GpError::InvalidTleLine0);
         }
         gp.common_name = name_line.to_string();
     }
 
-    // Parse through line 1 and populate TLE struct
-    if line1.len() < 69 || line1.len() > 69 {
-        panic!(
-            "TLE line 1 is invalid: must be 69 characters, got {}",
-            line1.len()
-        );
-    } else {
-        // Line 1
-        // Satellite catalog number
-        let catalog = line1[2..7].trim();
-        let first_char = catalog.chars().next().unwrap();
-        if first_char.is_ascii_digit() {
-            // This is a classic numeric catalog number
-            gp.satellite_catalog_number = catalog.parse::<i32>().unwrap();
-        } else if first_char.is_ascii_alphabetic() {
-            // This is an Alpha-5 catalog number
-            gp.satellite_catalog_number =
-                alpha5_digit(first_char).unwrap() * 10000 + catalog[1..].parse::<i32>().unwrap();
-        } else {
-            // This is an unexpected catalog number
-            panic!(
-                "TLE line 1 is invalid: catalog number is invalid: {}",
-                catalog
-            );
-        }
-
-        // Classification
-        gp.classification = line1[7..8].trim().parse::<char>().unwrap();
-
-        // International designator (COSPAR YYYY-NNNP)
-        let intl_des = line1[9..17].trim();
-        if intl_des.is_empty() {
-            // Handle case where international designator is not present
-            gp.international_designator = "".to_string();
-        } else {
-            // Expand two-digit launch year and insert the COSPAR dash
-            let launch_year = tle_full_year(intl_des[0..2].parse::<i32>().unwrap());
-            gp.international_designator = format!("{}-{}", launch_year, &intl_des[2..]);
-        }
-
-        // Epoch year (last two numbers)
-        let yr_two_digit = line1[18..20].trim().parse::<i32>().unwrap();
-        let epoch_year = tle_full_year(yr_two_digit);
-
-        // Epoch day of year
-        let epoch_day = line1[20..32].trim().parse::<f64>().unwrap();
-
-        // Epoch UTC datetime
-        let Some(epoch_datetime) = dayofyr2utc(epoch_year, epoch_day).ok() else {
-            panic!(
-                "Error converting epoch day of year to UTC datetime: Epoch year: {}, Epoch day: {}",
-                epoch_year, epoch_day
-            );
-        };
-        gp.epoch_datetime = epoch_datetime;
-
-        // 1st derivative of mean motion [revs/day^2]
-        gp.first_derivative_of_mean_motion = line1[33..43].trim().parse::<f64>().unwrap() * 2.0;
-
-        // 2nd derivative of mean motion [revs/days^3]
-        // Account for - in 2nd derivative of mean motion
-        if line1[44..45].parse::<char>().unwrap() == '-' {
-            gp.second_derivative_of_mean_motion = format!("-0.{}", line1[45..50].trim())
-                .parse::<f64>()
-                .unwrap()
-                * 10.0_f64.powi(line1[50..52].parse::<i32>().unwrap())
-                * 6.0_f64;
-        } else {
-            gp.second_derivative_of_mean_motion = format!("0.{}", line1[45..50].trim())
-                .parse::<f64>()
-                .unwrap()
-                * 10.0_f64.powi(line1[50..52].parse::<i32>().unwrap())
-                * 6.0_f64;
-        }
-
-        // B* [1/Earth Radii]
-        // Account for - in B* term
-        if line1[53..54].parse::<char>().unwrap() == '-' {
-            gp.bstar = format!("-0.{}", line1[54..59].trim())
-                .parse::<f64>()
-                .unwrap()
-                * 10.0_f64.powi(line1[59..61].parse::<i32>().unwrap());
-        } else {
-            gp.bstar = format!("0.{}", line1[54..59].trim())
-                .parse::<f64>()
-                .unwrap()
-                * 10.0_f64.powi(line1[59..61].parse::<i32>().unwrap());
-        }
-
-        // Ephemeris type
-        if line1[62..63].trim().is_empty() {
-            // Handle case where ephemeris type is not present
-            gp.ephemeris_type = 0;
-        } else {
-            gp.ephemeris_type = line1[62..63].parse::<i32>().unwrap();
-        }
-
-        // Element set number
-        gp.element_set_number = line1[64..68].trim().parse::<i32>().unwrap();
+    // Line 1 must be 69 characters before field slices or checksum
+    if line1.len() != 69 {
+        return Err(GpError::InvalidTleLine1);
     }
 
-    // Parse through line 2 and populate TLE struct
-    if line2.len() < 69 || line2.len() > 69 {
-        panic!(
-            "TLE line 2 is invalid: must be 69 characters, got {}",
-            line2.len()
-        );
-    } else {
-        // Line 2
-        // Inclination [degs]
-        gp.inclination = line2[8..16].trim().parse::<f64>().unwrap();
-
-        // Right ascension of ascending node [degs]
-        gp.right_ascension_of_ascending_node = line2[17..25].trim().parse::<f64>().unwrap();
-
-        // Eccentricity
-        gp.eccentricity = format!("0.{}", line2[26..33].trim())
-            .parse::<f64>()
-            .unwrap();
-
-        // Argument of perigee [degs]
-        gp.argument_of_perigee = line2[34..42].trim().parse::<f64>().unwrap();
-
-        // Mean anomaly [degs]
-        gp.mean_anomaly = line2[43..51].trim().parse::<f64>().unwrap();
-
-        // Mean motion [revs/day]
-        gp.mean_motion = line2[52..63].trim().parse::<f64>().unwrap();
-
-        // Revolution number at epoch
-        gp.revolution_number_at_epoch = line2[63..68].trim().parse::<i64>().unwrap();
+    // Line 2 must be 69 characters before field slices or checksum
+    if line2.len() != 69 {
+        return Err(GpError::InvalidTleLine2);
     }
+
+    // Validate the TLE checksum. A mismatch is a warning, not an error.
+    if !tle_checksum(line1) || !tle_checksum(line2) {
+        eprintln!("warning: TLE checksum failed; continuing with parse");
+    }
+
+    // Satellite catalog number from line 1
+    gp.satellite_catalog_number =
+        parse_tle_catalog(&line1[2..7]).ok_or(GpError::InvalidTleLine1)?;
+
+    // Line 2 must carry the same NORAD catalog number
+    let catalog2 = parse_tle_catalog(&line2[2..7]).ok_or(GpError::InvalidTleLine2)?;
+    if catalog2 != gp.satellite_catalog_number {
+        return Err(GpError::MismatchedTleCatalog);
+    }
+
+    // Classification
+    gp.classification = line1[7..8]
+        .trim()
+        .parse::<char>()
+        .map_err(|_| GpError::InvalidTleLine1)?;
+
+    // International designator (COSPAR YYYY-NNNP)
+    let intl_des = line1[9..17].trim();
+    if intl_des.is_empty() {
+        // Handle case where international designator is not present
+        gp.international_designator = String::new();
+    } else if intl_des.len() < 2 {
+        return Err(GpError::InvalidTleLine1);
+    } else {
+        // Expand two-digit launch year and insert the COSPAR dash
+        let launch_year = tle_full_year(
+            intl_des[..2]
+                .parse::<i32>()
+                .map_err(|_| GpError::InvalidTleLine1)?,
+        );
+        gp.international_designator = format!("{}-{}", launch_year, &intl_des[2..]);
+    }
+
+    // Epoch year (last two numbers)
+    let yr_two_digit: i32 = line1[18..20]
+        .trim()
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine1)?;
+    let epoch_year = tle_full_year(yr_two_digit);
+
+    // Epoch day of year
+    let epoch_day: f64 = line1[20..32]
+        .trim()
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine1)?;
+
+    // Epoch UTC datetime
+    gp.epoch_datetime = dayofyr2utc(epoch_year, epoch_day).map_err(|_| GpError::InvalidTleEpoch)?;
+
+    // 1st derivative of mean motion [revs/day^2]
+    gp.first_derivative_of_mean_motion = line1[33..43]
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| GpError::InvalidTleLine1)?
+        * 2.0;
+
+    // 2nd derivative of mean motion [revs/days^3]
+    // Sign is a single column (space, +, or -) and must not be trimmed
+    let nddot_mantissa: f64 = if line1.as_bytes()[44] == b'-' {
+        format!("-0.{}", line1[45..50].trim())
+            .parse()
+            .map_err(|_| GpError::InvalidTleLine1)?
+    } else {
+        format!("0.{}", line1[45..50].trim())
+            .parse()
+            .map_err(|_| GpError::InvalidTleLine1)?
+    };
+    let nddot_exp: i32 = line1[50..52]
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine1)?;
+    gp.second_derivative_of_mean_motion = nddot_mantissa * 10.0_f64.powi(nddot_exp) * 6.0;
+
+    // B* [1/Earth Radii]
+    // Sign is a single column (space, +, or -) and must not be trimmed
+    let bstar_mantissa: f64 = if line1.as_bytes()[53] == b'-' {
+        format!("-0.{}", line1[54..59].trim())
+            .parse()
+            .map_err(|_| GpError::InvalidTleLine1)?
+    } else {
+        format!("0.{}", line1[54..59].trim())
+            .parse()
+            .map_err(|_| GpError::InvalidTleLine1)?
+    };
+    let bstar_exp: i32 = line1[59..61]
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine1)?;
+    gp.bstar = bstar_mantissa * 10.0_f64.powi(bstar_exp);
+
+    // Ephemeris type
+    if line1[62..63].trim().is_empty() {
+        // Handle case where ephemeris type is not present
+        gp.ephemeris_type = 0;
+    } else {
+        gp.ephemeris_type = line1[62..63]
+            .parse()
+            .map_err(|_| GpError::InvalidTleLine1)?;
+    }
+
+    // Element set number
+    gp.element_set_number = line1[64..68]
+        .trim()
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine1)?;
+
+    // Inclination [degs]
+    gp.inclination = line2[8..16]
+        .trim()
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine2)?;
+
+    // Right ascension of ascending node [degs]
+    gp.right_ascension_of_ascending_node = line2[17..25]
+        .trim()
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine2)?;
+
+    // Eccentricity
+    gp.eccentricity = format!("0.{}", line2[26..33].trim())
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine2)?;
+
+    // Argument of perigee [degs]
+    gp.argument_of_perigee = line2[34..42]
+        .trim()
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine2)?;
+
+    // Mean anomaly [degs]
+    gp.mean_anomaly = line2[43..51]
+        .trim()
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine2)?;
+
+    // Mean motion [revs/day]
+    gp.mean_motion = line2[52..63]
+        .trim()
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine2)?;
+
+    // Revolution number at epoch
+    gp.revolution_number_at_epoch = line2[63..68]
+        .trim()
+        .parse()
+        .map_err(|_| GpError::InvalidTleLine2)?;
 
     // Initialize the SGP4 parameters
-    init_sgp4(&gp, None)
+    Ok(init_sgp4(&gp, None))
 }
 
 /// Builds a vector of [`Sgp4`] structs from a string containing Two-Line Element (TLE) sets.
@@ -459,10 +513,18 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Sgp4 {
 /// * `tle_string` - A string containing one or more Two-Line Element (TLE) sets
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 parameters
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 parameters
+/// * `Err(GpError)` - If a TLE in the string cannot be parsed
+///
+/// # Errors
+/// * [`GpError::InvalidTleLine0`] - If an optional name line is empty or longer than 24 characters
+/// * [`GpError::InvalidTleLine1`] - If a line 1 is not 69 characters or a field cannot be parsed
+/// * [`GpError::InvalidTleLine2`] - If a line 2 is not 69 characters or a field cannot be parsed
+/// * [`GpError::InvalidTleEpoch`] - If an epoch cannot be converted to a UTC datetime
+/// * [`GpError::MismatchedTleCatalog`] - If a TLE has different NORAD catalog numbers on line 1 and line 2
 ///
 /// # Panics
-/// * If a TLE in the string cannot be parsed (see [`from_tle_lines`])
+/// * If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -476,7 +538,7 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Sgp4 {
 /// ";
 ///
 /// // Parse the TLE string into SGP4 propagators
-/// let sgp4s = from_tle_string(tle);
+/// let sgp4s = from_tle_string(tle).unwrap();
 ///
 /// // Assert the catalog number and name
 /// assert_eq!(sgp4s.len(), 1);
@@ -486,7 +548,7 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Sgp4 {
 ///
 /// # References
 /// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
-pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
+pub fn from_tle_string(tle_string: &str) -> Result<Vec<Sgp4>, GpError> {
     // Parse the string into lines, removing spaces
     let lines: Vec<&str> = tle_string
         .lines()
@@ -508,7 +570,7 @@ pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
             }
             // Check that next line starts with '2'
             if lines[i + 1].starts_with('2') {
-                let sgp4 = from_tle_lines(lines[i], lines[i + 1], None);
+                let sgp4 = from_tle_lines(lines[i], lines[i + 1], None)?;
                 sgp4s.push(sgp4);
                 i += 2;
             } else {
@@ -521,7 +583,7 @@ pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
             }
             // Check that next line 2 lines starts with '1' and '2'
             if lines[i + 1].starts_with('1') && lines[i + 2].starts_with('2') {
-                let sgp4 = from_tle_lines(lines[i + 1], lines[i + 2], Some(lines[i]));
+                let sgp4 = from_tle_lines(lines[i + 1], lines[i + 2], Some(lines[i]))?;
                 sgp4s.push(sgp4);
                 i += 3;
             } else {
@@ -530,7 +592,7 @@ pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
         }
     }
     // Return vector of SGP4 structs
-    sgp4s
+    Ok(sgp4s)
 }
 
 /// Builds a vector of [`Sgp4`] structs from a file containing Two-Line Element (TLE) sets.
@@ -543,11 +605,19 @@ pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
 /// * `file_path` - A path to a file containing one or more Two-Line Element (TLE) sets
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 structs.
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 structs
+/// * `Err(GpError)` - If the file cannot be read or a TLE cannot be parsed
+///
+/// # Errors
+/// * [`GpError::Io`] - If the file cannot be read
+/// * [`GpError::InvalidTleLine0`] - If an optional name line is empty or longer than 24 characters
+/// * [`GpError::InvalidTleLine1`] - If a line 1 is not 69 characters or a field cannot be parsed
+/// * [`GpError::InvalidTleLine2`] - If a line 2 is not 69 characters or a field cannot be parsed
+/// * [`GpError::InvalidTleEpoch`] - If an epoch cannot be converted to a UTC datetime
+/// * [`GpError::MismatchedTleCatalog`] - If a TLE has different NORAD catalog numbers on line 1 and line 2
 ///
 /// # Panics
-/// * If the file cannot be read
-/// * If a TLE in the file cannot be parsed (see [`from_tle_lines`])
+/// * If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -565,7 +635,7 @@ pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
 /// std::fs::write(&path, tle).unwrap();
 ///
 /// // Parse the TLE file into SGP4 propagators
-/// let sgp4s = from_tle_file(path.to_str().unwrap());
+/// let sgp4s = from_tle_file(path.to_str().unwrap()).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -578,9 +648,9 @@ pub fn from_tle_string(tle_string: &str) -> Vec<Sgp4> {
 ///
 /// # References
 /// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
-pub fn from_tle_file(file_path: &str) -> Vec<Sgp4> {
+pub fn from_tle_file(file_path: &str) -> Result<Vec<Sgp4>, GpError> {
     // Open the TLE file
-    let tle_string = fs::read_to_string(file_path).expect("Cannot read TLE file");
+    let tle_string = fs::read_to_string(file_path).map_err(|err| GpError::Io(err.to_string()))?;
 
     // Parse tle string into a vector of SGP4 structs
     from_tle_string(&tle_string)
@@ -627,16 +697,17 @@ fn calc_checksum(line: &str) -> i32 {
 ///
 /// # Returns
 /// * `bool` - True if the checksum of the line is valid, false if otherwise
-///
-/// # Panics
-/// * If the line is shorter than 69 characters
-/// * If the last character is not a digit
 fn tle_checksum(line: &str) -> bool {
-    // Calculate the checksum of the line
-    let checksum = calc_checksum(line);
+    // The checksum digit is the 69th character
+    if line.len() < 69 {
+        return false;
+    }
 
     // Compare the checksum to the last character of the line
-    checksum == line[68..69].parse::<i32>().unwrap()
+    let Ok(digit) = line[68..69].parse::<i32>() else {
+        return false;
+    };
+    calc_checksum(line) == digit
 }
 
 /// Convert a two-digit TLE year to a four-digit Gregorian year.
@@ -657,7 +728,7 @@ fn tle_checksum(line: &str) -> bool {
 /// // Two-digit TLE year 08 maps to 2008 (00-56 -> 2000-2056)
 /// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, None);
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, None).unwrap();
 ///
 /// // Assert the epoch year is the four-digit Gregorian year
 /// assert_eq!(sgp4.gp.epoch_datetime.year, 2008);
@@ -667,6 +738,30 @@ fn tle_full_year(two_digit_year: i32) -> i32 {
         2000 + two_digit_year
     } else {
         1900 + two_digit_year
+    }
+}
+
+/// Parse a TLE NORAD catalog field (numeric or Alpha-5).
+///
+/// # Arguments
+/// * `field` - Five-character catalog substring from TLE line 1 or line 2
+///
+/// # Returns
+/// * `Some(n)` - The catalog number
+/// * `None` - If the field is empty or not a valid catalog number
+fn parse_tle_catalog(field: &str) -> Option<i32> {
+    let catalog = field.trim();
+    let first_char = catalog.chars().next()?;
+    if first_char.is_ascii_digit() {
+        // This is a classic numeric catalog number
+        catalog.parse().ok()
+    } else if first_char.is_ascii_alphabetic() {
+        // This is an Alpha-5 catalog number
+        let alpha = alpha5_digit(first_char)?;
+        let rest: i32 = catalog[1..].parse().ok()?;
+        Some(alpha * 10000 + rest)
+    } else {
+        None
     }
 }
 
@@ -729,37 +824,32 @@ fn alpha5_letter(digit: i32) -> Option<char> {
 /// * `catalog` - The NORAD catalog number
 ///
 /// # Returns
-/// * A 5-character catalog field
+/// * `Ok(String)` - A 5-character catalog field
+/// * `Err(GpError)` - If the catalog number cannot be written as a TLE field
 ///
-/// # Panics
-/// * If the catalog number is negative or greater than 339999
+/// # Errors
+/// * [`GpError::InvalidTLECatalogNumber`] - If the catalog number is negative or greater than 339999
 ///
 /// # References
 /// - [Alpha-5 Standard](https://www.space-track.org/documentation#tle-alpha5)
-fn format_tle_catalog_number(catalog: i32) -> String {
+fn format_tle_catalog_number(catalog: i32) -> Result<String, GpError> {
     // Reject negative catalog numbers
     if catalog < 0 {
-        panic!(
-            "TLE catalog number is invalid: must be non-negative, got {}",
-            catalog
-        );
+        return Err(GpError::InvalidTLECatalogNumber);
     }
 
     if catalog < 100000 {
         // This is a classic numeric catalog number
-        return format!("{:>5}", catalog);
+        return Ok(format!("{:>5}", catalog));
     }
 
     // This is an Alpha-5 catalog number
     let first = catalog / 10000;
     let rest = catalog % 10000;
     let Some(letter) = alpha5_letter(first) else {
-        panic!(
-            "TLE catalog number is invalid: {} is outside the Alpha-5 range",
-            catalog
-        );
+        return Err(GpError::InvalidTLECatalogNumber);
     };
-    format!("{}{:04}", letter, rest)
+    Ok(format!("{}{:04}", letter, rest))
 }
 
 /// Format an international designator for a TLE
@@ -804,8 +894,17 @@ fn format_tle_intl_des(intl: &str) -> String {
 /// * `epoch` - The epoch datetime
 ///
 /// # Returns
-/// * A 14-character TLE epoch field
-fn format_tle_epoch(epoch: &DateTime) -> String {
+/// * `Ok(String)` - A 14-character TLE epoch field
+/// * `Err(GpError)` - If the datetime cannot be written as a TLE epoch
+///
+/// # Errors
+/// * [`GpError::InvalidTLEDateTime`] - If the year is before 1957 or after 2056
+fn format_tle_epoch(epoch: &DateTime) -> Result<String, GpError> {
+    // TLE two-digit years cover 1957-2056
+    if !(1957..=2056).contains(&epoch.year) {
+        return Err(GpError::InvalidTLEDateTime);
+    }
+
     // TLE years are stored modulo 100
     let two_digit_year = ((epoch.year % 100) + 100) % 100;
 
@@ -834,7 +933,7 @@ fn format_tle_epoch(epoch: &DateTime) -> String {
     let day_frac = (epoch.hour as f64 * 3600.0 + epoch.minute as f64 * 60.0 + second) / 86400.0;
     let dayofyr = day_int as f64 + day_frac;
 
-    format!("{:02}{:012.8}", two_digit_year, dayofyr)
+    Ok(format!("{:02}{:012.8}", two_digit_year, dayofyr))
 }
 
 /// Format the TLE-printed first derivative of mean motion
@@ -930,20 +1029,18 @@ fn format_tle_eccentricity(eccentricity: f64) -> String {
 /// * `line68` - The first 68 characters of a TLE data line
 ///
 /// # Returns
-/// * A 69-character TLE line including checksum
+/// * `Ok(String)` - A 69-character TLE line including checksum
+/// * `Err(GpError)` - If `line68` is not exactly 68 characters
 ///
-/// # Panics
-/// * If `line68` is not exactly 68 characters
-fn tle_line_with_checksum(line68: &str) -> String {
+/// # Errors
+/// * [`GpError::InvalidTLELine`] - If `line68` is not exactly 68 characters
+fn tle_line_with_checksum(line68: &str) -> Result<String, GpError> {
     if line68.len() != 68 {
-        panic!(
-            "TLE line is invalid: must be 68 characters before checksum, got {}",
-            line68.len()
-        );
+        return Err(GpError::InvalidTLELine);
     }
 
     // Append checksum as the 69th character
-    format!("{}{}", line68, calc_checksum(line68))
+    Ok(format!("{}{}", line68, calc_checksum(line68)))
 }
 
 /// Build TLE line 1 from a general perturbation element set
@@ -955,11 +1052,12 @@ fn tle_line_with_checksum(line68: &str) -> String {
 /// * `gp` - The element set to serialize
 ///
 /// # Returns
-/// * TLE line 1, including checksum
-fn format_tle_line1(gp: &GenPerturbElementSet) -> String {
+/// * `Ok(String)` - TLE line 1, including checksum
+/// * `Err(GpError)` - If a TLE field cannot be written
+fn format_tle_line1(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     // Line 1
     // Satellite catalog number
-    let catalog = format_tle_catalog_number(gp.satellite_catalog_number);
+    let catalog = format_tle_catalog_number(gp.satellite_catalog_number)?;
 
     // Classification
     let classification = if gp.classification.is_ascii_graphic() {
@@ -972,7 +1070,7 @@ fn format_tle_line1(gp: &GenPerturbElementSet) -> String {
     let intl_des = format_tle_intl_des(&gp.international_designator);
 
     // Epoch year and day of year
-    let epoch = format_tle_epoch(&gp.epoch_datetime);
+    let epoch = format_tle_epoch(&gp.epoch_datetime)?;
 
     // 1st derivative of mean motion (TLE prints the stored value divided by 2)
     let ndot = format_tle_ndot(gp.first_derivative_of_mean_motion / 2.0);
@@ -1009,11 +1107,12 @@ fn format_tle_line1(gp: &GenPerturbElementSet) -> String {
 /// * `gp` - The element set to serialize
 ///
 /// # Returns
-/// * TLE line 2, including checksum
-fn format_tle_line2(gp: &GenPerturbElementSet) -> String {
+/// * `Ok(String)` - TLE line 2, including checksum
+/// * `Err(GpError)` - If a TLE field cannot be written
+fn format_tle_line2(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     // Line 2
     // Satellite catalog number
-    let catalog = format_tle_catalog_number(gp.satellite_catalog_number);
+    let catalog = format_tle_catalog_number(gp.satellite_catalog_number)?;
 
     // Inclination [degs]
     let inclination = format!("{:8.4}", gp.inclination);
@@ -1061,8 +1160,9 @@ fn format_tle_line2(gp: &GenPerturbElementSet) -> String {
 /// * `gp` - The element set to serialize
 ///
 /// # Returns
-/// * One TLE in 2-line or 3-line format, including a trailing newline
-fn gp_to_tle(gp: &GenPerturbElementSet) -> String {
+/// * `Ok(String)` - One TLE in 2-line or 3-line format, including a trailing newline
+/// * `Err(GpError)` - If a TLE field cannot be written
+fn gp_to_tle(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     let mut tle = String::new();
 
     // Optional name line (TLE line 0)
@@ -1077,11 +1177,11 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> String {
     }
 
     // TLE line 1 and line 2
-    tle.push_str(&format_tle_line1(gp));
+    tle.push_str(&format_tle_line1(gp)?);
     tle.push('\n');
-    tle.push_str(&format_tle_line2(gp));
+    tle.push_str(&format_tle_line2(gp)?);
     tle.push('\n');
-    tle
+    Ok(tle)
 }
 
 /// Builds a Two-Line Element (TLE) string from a slice of [`Sgp4`] structs.
@@ -1097,7 +1197,13 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> String {
 /// * `sgp4s` - The SGP4 structs to export
 ///
 /// # Returns
-/// * `String` - One or more TLEs
+/// * `Ok(String)` - One or more TLEs
+/// * `Err(GpError)` - If a TLE field cannot be written
+///
+/// # Errors
+/// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
+/// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056
+/// * [`GpError::InvalidTLELine`] - If a formatted TLE data line is not 68 characters before the checksum
 ///
 /// # Examples
 /// ```rust
@@ -1111,9 +1217,9 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> String {
 /// ";
 ///
 /// // Parse, export, and parse again
-/// let sgp4s = from_tle_string(tle);
-/// let exported = to_tle_string(&sgp4s);
-/// let reparsed = from_tle_string(&exported);
+/// let sgp4s = from_tle_string(tle).unwrap();
+/// let exported = to_tle_string(&sgp4s).unwrap();
+/// let reparsed = from_tle_string(&exported).unwrap();
 ///
 /// // Assert the round-trip catalog number and name
 /// assert_eq!(reparsed.len(), 1);
@@ -1124,14 +1230,14 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> String {
 /// # References
 /// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
 /// - [Alpha-5 Standard](https://www.space-track.org/documentation#tle-alpha5)
-pub fn to_tle_string(sgp4s: &[Sgp4]) -> String {
+pub fn to_tle_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
     // Serialize each element set as one TLE
     let mut records = String::new();
     for sgp4 in sgp4s {
-        records.push_str(&gp_to_tle(&sgp4.gp));
+        records.push_str(&gp_to_tle(&sgp4.gp)?);
     }
 
-    records
+    Ok(records)
 }
 
 /// Writes a Two-Line Element (TLE) file from a slice of [`Sgp4`] structs.
@@ -1143,8 +1249,15 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> String {
 /// * `sgp4s` - The SGP4 structs to export
 /// * `tle_file_path` - Destination path for the TLE file
 ///
-/// # Panics
-/// * If the file cannot be written
+/// # Returns
+/// * `Ok(())` - If the file was written
+/// * `Err(GpError)` - If a TLE field cannot be written or the file cannot be written
+///
+/// # Errors
+/// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
+/// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056
+/// * [`GpError::InvalidTLELine`] - If a formatted TLE data line is not 68 characters before the checksum
+/// * [`GpError::Io`] - If the file cannot be written
 ///
 /// # Examples
 /// ```rust
@@ -1156,15 +1269,15 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> String {
 /// 1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
 /// 2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
 /// ";
-/// let sgp4s = from_tle_string(tle);
+/// let sgp4s = from_tle_string(tle).unwrap();
 ///
 /// // Write the element sets to a temporary TLE file
 /// let path = std::env::temp_dir().join("mako_sgp4_to_tle_file.tle");
 /// let path_str = path.to_str().unwrap();
-/// to_tle_file(&sgp4s, path_str);
+/// to_tle_file(&sgp4s, path_str).unwrap();
 ///
 /// // Parse the written file
-/// let reparsed = from_tle_file(path_str);
+/// let reparsed = from_tle_file(path_str).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -1178,10 +1291,11 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> String {
 /// # References
 /// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
 /// - [Alpha-5 Standard](https://www.space-track.org/documentation#tle-alpha5)
-pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) {
+pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the TLE file
-    let tle_string = to_tle_string(sgp4s);
-    fs::write(tle_file_path, tle_string).expect("Cannot write TLE file");
+    let tle_string = to_tle_string(sgp4s)?;
+    fs::write(tle_file_path, tle_string).map_err(|err| GpError::Io(err.to_string()))?;
+    Ok(())
 }
 
 /// Builds a [`Sgp4`] struct from the lines of a single OMM KVN record.
@@ -3231,6 +3345,75 @@ mod tests {
     use toml::from_str;
 
     #[test]
+    fn test_tle_catalog_mismatch() {
+        let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+        let line2 = "2 25545  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+        let err = match from_tle_lines(line1, line2, None) {
+            Err(err) => err,
+            Ok(_) => panic!("expected MismatchedTleCatalog"),
+        };
+        assert_eq!(err, GpError::MismatchedTleCatalog);
+    }
+
+    #[test]
+    fn test_tle_file_io_error() {
+        let err = match from_tle_file("test/this_tle_file_does_not_exist.txt") {
+            Err(err) => err,
+            Ok(_) => panic!("expected GpError::Io"),
+        };
+        assert!(matches!(err, GpError::Io(_)));
+    }
+
+    #[test]
+    fn test_invalid_tle_catalog_number() {
+        let err = match format_tle_catalog_number(-1) {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidTLECatalogNumber"),
+        };
+        assert_eq!(err, GpError::InvalidTLECatalogNumber);
+
+        let err = match format_tle_catalog_number(340000) {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidTLECatalogNumber"),
+        };
+        assert_eq!(err, GpError::InvalidTLECatalogNumber);
+    }
+
+    #[test]
+    fn test_invalid_tle_datetime() {
+        let mut epoch = DateTime {
+            year: 1956,
+            month: 12,
+            day: 31,
+            hour: 0,
+            minute: 0,
+            second: 0.0,
+            timezone: Timezone::UTC,
+        };
+        let err = match format_tle_epoch(&epoch) {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidTLEDateTime"),
+        };
+        assert_eq!(err, GpError::InvalidTLEDateTime);
+
+        epoch.year = 2057;
+        let err = match format_tle_epoch(&epoch) {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidTLEDateTime"),
+        };
+        assert_eq!(err, GpError::InvalidTLEDateTime);
+    }
+
+    #[test]
+    fn test_invalid_tle_line() {
+        let err = match tle_line_with_checksum("1 25544U") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidTLELine"),
+        };
+        assert_eq!(err, GpError::InvalidTLELine);
+    }
+
+    #[test]
     fn test_tle_full_year() {
         assert_eq!(tle_full_year(0), 2000);
         assert_eq!(tle_full_year(25), 2025);
@@ -3494,7 +3677,7 @@ mod tests {
         );
     }
 
-    fn sgp4_from_case_tle(tle: &str) -> Sgp4 {
+    fn sgp4_from_case_tle(tle: &str) -> Result<Sgp4, GpError> {
         let lines: Vec<&str> = tle
             .lines()
             .map(str::trim)
@@ -3514,7 +3697,8 @@ mod tests {
         let cases: ParsingCases =
             from_str(&content).expect("could not parse test/tle_parsing_cases.toml");
 
-        let from_file = from_tle_file("test/tle_parsing_cases.txt");
+        let from_file = from_tle_file("test/tle_parsing_cases.txt")
+            .expect("could not read test/tle_parsing_cases.txt");
         let expected_file_count = cases.test.values().filter(|c| !c.exception).count();
         assert_eq!(
             from_file.len(),
@@ -3529,25 +3713,30 @@ mod tests {
             let case = &cases.test[key];
 
             if case.exception {
-                let lines_result = std::panic::catch_unwind(|| sgp4_from_case_tle(&case.tle));
                 assert!(
-                    lines_result.is_err(),
-                    "case {key} ({}): expected from_tle_lines to panic",
+                    sgp4_from_case_tle(&case.tle).is_err(),
+                    "case {key} ({}): expected from_tle_lines to return Err",
                     case.name
                 );
-                let string_result = std::panic::catch_unwind(|| from_tle_string(&case.tle));
                 assert!(
-                    string_result.is_err(),
-                    "case {key} ({}): expected from_tle_string to panic",
+                    from_tle_string(&case.tle).is_err(),
+                    "case {key} ({}): expected from_tle_string to return Err",
                     case.name
                 );
                 continue;
             }
 
-            let from_lines = sgp4_from_case_tle(&case.tle);
+            let from_lines = sgp4_from_case_tle(&case.tle).unwrap_or_else(|err| {
+                panic!("case {key} ({}): from_tle_lines failed: {err:?}", case.name)
+            });
             assert_gp_matches(key, &case.name, "from_tle_lines", &from_lines.gp, case);
 
-            let from_string = from_tle_string(&case.tle);
+            let from_string = from_tle_string(&case.tle).unwrap_or_else(|err| {
+                panic!(
+                    "case {key} ({}): from_tle_string failed: {err:?}",
+                    case.name
+                )
+            });
             assert_eq!(
                 from_string.len(),
                 1,
@@ -3991,16 +4180,17 @@ mod tests {
     #[test]
     fn test_tle_export_empty() {
         // An empty slice should produce an empty TLE string
-        let exported = to_tle_string(&[]);
+        let exported = to_tle_string(&[]).expect("empty TLE export should succeed");
         assert_eq!(exported, "");
     }
 
     #[test]
     fn test_tle_export_string_roundtrip() {
         // Parse the TLE test file, export, and parse the export
-        let original = from_tle_file("test/tle_parsing_cases.txt");
-        let exported = to_tle_string(&original);
-        let reparsed = from_tle_string(&exported);
+        let original = from_tle_file("test/tle_parsing_cases.txt")
+            .expect("could not read test/tle_parsing_cases.txt");
+        let exported = to_tle_string(&original).expect("TLE export should succeed");
+        let reparsed = from_tle_string(&exported).expect("exported TLE string should parse");
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4011,12 +4201,13 @@ mod tests {
     #[test]
     fn test_tle_export_file_roundtrip() {
         // Parse the TLE test file and write it back out
-        let original = from_tle_file("test/tle_parsing_cases.txt");
+        let original = from_tle_file("test/tle_parsing_cases.txt")
+            .expect("could not read test/tle_parsing_cases.txt");
         let out_path = export_test_path("tle.txt");
-        to_tle_file(&original, &out_path);
+        to_tle_file(&original, &out_path).expect("TLE file export should succeed");
 
         // Parse the written file and compare GP fields
-        let reparsed = from_tle_file(&out_path);
+        let reparsed = from_tle_file(&out_path).expect("could not parse exported TLE file");
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4027,8 +4218,9 @@ mod tests {
     #[test]
     fn test_tle_export_line_format() {
         // Exported data lines must be 69 characters and pass the checksum
-        let original = from_tle_file("test/tle_parsing_cases.txt");
-        let exported = to_tle_string(&original);
+        let original = from_tle_file("test/tle_parsing_cases.txt")
+            .expect("could not read test/tle_parsing_cases.txt");
+        let exported = to_tle_string(&original).expect("TLE export should succeed");
 
         for line in exported.lines() {
             if line.starts_with('1') || line.starts_with('2') {

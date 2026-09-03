@@ -28,7 +28,7 @@ use crate::time::{DateTime, utc2jday};
 /// let line0 = "ISS (ZARYA)";
 /// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0)).unwrap();
 ///
 /// // ISS is a near-Earth satellite
 /// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
@@ -97,7 +97,7 @@ pub struct Sgp4 {
 /// let line0 = "ISS (ZARYA)";
 /// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0)).unwrap();
 ///
 /// // Mean motion and semi-major axis are physical
 /// assert!(sgp4.brouwer0.n > 0.0);
@@ -153,7 +153,7 @@ pub struct BrouwerMeanElements {
 /// let line0 = "ISS (ZARYA)";
 /// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0)).unwrap();
 ///
 /// // Perigee height is above the Earth
 /// assert!(sgp4.atm_params.hp > 0.0);
@@ -214,7 +214,7 @@ pub struct AtmDragParams {
 /// let line0 = "ISS (ZARYA)";
 /// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0)).unwrap();
 ///
 /// // RAAN precession is non-zero for an inclined LEO
 /// assert!(sgp4.zonal_params.raan_dot.is_finite());
@@ -249,7 +249,7 @@ pub struct EarthZonalParams {
 /// let line0 = "ISS (ZARYA)";
 /// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0)).unwrap();
 ///
 /// // Near-Earth satellites do not apply lunar/solar secular rates
 /// assert_eq!(sgp4.solar_params.n, 0.0);
@@ -380,7 +380,7 @@ pub struct ThirdBodyParams {
 /// let line0 = "ISS (ZARYA)";
 /// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0)).unwrap();
 ///
 /// assert!(!sgp4.half_day_resonance);
 /// ```
@@ -443,7 +443,7 @@ pub struct HalfDayResonanceParams {
 /// let line0 = "ISS (ZARYA)";
 /// let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(line1, line2, Some(line0));
+/// let sgp4 = from_tle_lines(line1, line2, Some(line0)).unwrap();
 ///
 /// assert!(!sgp4.whole_day_resonance);
 /// ```
@@ -547,7 +547,7 @@ const RPTIM: f64 = 4.375_269_088_011_3e-3;
 /// let tle_line0 = "ISS (ZARYA)";
 /// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let parsed = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
+/// let parsed = from_tle_lines(tle_line1, tle_line2, Some(tle_line0)).unwrap();
 ///
 /// // Initialize the SGP4 propagator (None uses WGS-72)
 /// let sgp4 = init_sgp4(&parsed.gp, Some(&WGS72));
@@ -1404,7 +1404,7 @@ fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// let tle_line0 = "ISS (ZARYA)";
 /// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0)).unwrap();
 ///
 /// // Propagate to the TLE epoch
 /// let state_vector = sgp4_prop_datetime(&sgp4, &sgp4.gp.epoch_datetime);
@@ -1455,7 +1455,7 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector {
 /// let tle_line0 = "ISS (ZARYA)";
 /// let tle_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
 /// let tle_line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0));
+/// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0)).unwrap();
 ///
 /// // Propagate 6 hours past epoch
 /// let state_vector = sgp4_prop_delta(&sgp4, 360.0);
@@ -2191,7 +2191,7 @@ mod tests {
                 continue;
             }
 
-            let sgp4s = from_tle_string(&case.tle);
+            let sgp4s = from_tle_string(&case.tle).expect("Vallado TLE should parse");
             assert!(!sgp4s.is_empty(), "case {key}: TLE failed to parse");
             let sgp4 = &sgp4s[0];
 

@@ -16,18 +16,12 @@ In progress
 
 ## Plan / TODOs
 - Package as a crate
-    - Add a license
-    - Add manifest
-    - Add CI in github
-    - Straighten out README
     - Return error instead of panic
-    - Hide internal functions from API
+    - Straighten out README
     - Add examples to docs
-    - Make XML, JSON, and CSV optional (external crates)
+    - Write math spec
 - Fit state data to GP
-- Write math spec
 - Python wrapper
-- Conjunction screening
 
 ## Testing and Documentation
 ```bash
