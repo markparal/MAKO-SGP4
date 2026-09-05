@@ -59,12 +59,12 @@ fn main() {
     MEAN_MOTION_DOT = .6535E-4
     MEAN_MOTION_DDOT = 0
     ";
-    
+
     // Parse the OMM-KVN string into an SGP4 propagator. Returns a vector of SGP4 propagators
     let omm_kvn_sgp4s = from_omm_kvn_string(omm_kvn).unwrap();
 
     // Define a desired datetime to propagate to
-    let desired_datetime = DateTime{
+    let desired_datetime = DateTime {
         year: 2026,
         month: 9,
         day: 5,
@@ -80,7 +80,13 @@ fn main() {
     // Print the result in TEME coordinates
     println!(
         "{}\nr_TEME = [{:.3}, {:.3}, {:.3}] km\nv_TEME = [{:.3}, {:.3}, {:.3}] km/s",
-        omm_kvn_sgp4s[0].gp.common_name, state.r_x, state.r_y, state.r_z, state.v_x, state.v_y, state.v_z
+        omm_kvn_sgp4s[0].gp.common_name,
+        state.r_x,
+        state.r_y,
+        state.r_z,
+        state.v_x,
+        state.v_y,
+        state.v_z
     );
 }
 
