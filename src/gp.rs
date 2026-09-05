@@ -23,7 +23,7 @@ use csv::{ReaderBuilder, WriterBuilder};
 // ------------------
 // Internal Libraries
 // ------------------
-use crate::sgp4::{Sgp4, init_sgp4};
+use crate::sgp4::{Sgp4, Sgp4Error, init_sgp4};
 use crate::time::{DateTime, Timezone, dayofyr2utc};
 
 // -------
@@ -141,6 +141,24 @@ pub enum GpError {
 
     /// A TLE data line is not 68 characters before the checksum
     InvalidTLELine,
+
+    /// An OMM field cannot be parsed as the requested type
+    InvalidOmmField,
+
+    /// OMM EPOCH cannot be parsed as a UTC datetime
+    InvalidOmmEpoch,
+
+    /// OMM XML document cannot be parsed
+    InvalidOmmXml,
+
+    /// OMM JSON cannot be parsed or is not an object or array of objects
+    InvalidOmmJson,
+
+    /// OMM CSV cannot be parsed
+    InvalidOmmCsv,
+
+    /// SGP4 initialization failed
+    Sgp4(Sgp4Error),
 }
 
 // ------
@@ -166,7 +184,7 @@ pub enum GpError {
 /// NORAD_CAT_ID   = 69097
 /// BSTAR          = .39221734D-3
 /// ";
-/// let sgp4 = &from_omm_kvn_string(omm)[0];
+/// let sgp4 = &from_omm_kvn_string(omm).unwrap()[0];
 ///
 /// // Assert typed field conversion and the unclassified default
 /// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
@@ -178,7 +196,7 @@ trait FromOmm: Sized {
     fn omm_default() -> Self;
 
     /// Parse a present, non-empty OMM field value
-    fn from_omm(field: &str, value: &str) -> Self;
+    fn from_omm(field: &str, value: &str) -> Result<Self, GpError>;
 }
 
 impl FromOmm for String {
@@ -186,8 +204,8 @@ impl FromOmm for String {
         String::new()
     }
 
-    fn from_omm(_field: &str, value: &str) -> Self {
-        value.to_string()
+    fn from_omm(_field: &str, value: &str) -> Result<Self, GpError> {
+        Ok(value.to_string())
     }
 }
 
@@ -196,8 +214,8 @@ impl FromOmm for char {
         'U'
     }
 
-    fn from_omm(_field: &str, value: &str) -> Self {
-        value.chars().next().unwrap_or('U')
+    fn from_omm(_field: &str, value: &str) -> Result<Self, GpError> {
+        Ok(value.chars().next().unwrap_or('U'))
     }
 }
 
@@ -206,11 +224,11 @@ impl FromOmm for f64 {
         0.0
     }
 
-    fn from_omm(field: &str, value: &str) -> Self {
+    fn from_omm(_field: &str, value: &str) -> Result<Self, GpError> {
         let normalized = value.replace(['D', 'd'], "E");
-        normalized.parse::<f64>().unwrap_or_else(|_| {
-            panic!("OMM field {} is not a valid number: {}", field, value);
-        })
+        normalized
+            .parse::<f64>()
+            .map_err(|_| GpError::InvalidOmmField)
     }
 }
 
@@ -219,10 +237,8 @@ impl FromOmm for i32 {
         0
     }
 
-    fn from_omm(field: &str, value: &str) -> Self {
-        value.parse::<i32>().unwrap_or_else(|_| {
-            panic!("OMM field {} is not a valid integer: {}", field, value);
-        })
+    fn from_omm(_field: &str, value: &str) -> Result<Self, GpError> {
+        value.parse::<i32>().map_err(|_| GpError::InvalidOmmField)
     }
 }
 
@@ -231,10 +247,8 @@ impl FromOmm for i64 {
         0
     }
 
-    fn from_omm(field: &str, value: &str) -> Self {
-        value.parse::<i64>().unwrap_or_else(|_| {
-            panic!("OMM field {} is not a valid integer: {}", field, value);
-        })
+    fn from_omm(_field: &str, value: &str) -> Result<Self, GpError> {
+        value.parse::<i64>().map_err(|_| GpError::InvalidOmmField)
     }
 }
 
@@ -243,7 +257,7 @@ impl FromOmm for DateTime {
         DateTime::default()
     }
 
-    fn from_omm(_field: &str, value: &str) -> Self {
+    fn from_omm(_field: &str, value: &str) -> Result<Self, GpError> {
         parse_omm_epoch(value)
     }
 }
@@ -296,7 +310,7 @@ const OMM_CSV_HEADERS: [&str; 17] = [
 ///
 /// # Returns
 /// * `Ok(Sgp4)` - Struct containing the parsed SGP4 parameters
-/// * `Err(GpError)` - If a TLE line or field cannot be parsed
+/// * `Err(GpError)` - If a TLE line or field cannot be parsed, or SGP4 initialization fails
 ///
 /// # Errors
 /// * [`GpError::InvalidTleLine0`] - If the optional name line is empty or longer than 24 characters
@@ -304,9 +318,7 @@ const OMM_CSV_HEADERS: [&str; 17] = [
 /// * [`GpError::InvalidTleLine2`] - If line 2 is not 69 characters or a field cannot be parsed
 /// * [`GpError::InvalidTleEpoch`] - If the epoch cannot be converted to a UTC datetime
 /// * [`GpError::MismatchedTleCatalog`] - If line 1 and line 2 have different NORAD catalog numbers
-///
-/// # Panics
-/// * If SGP4 initialization fails
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -500,7 +512,7 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Result<S
         .map_err(|_| GpError::InvalidTleLine2)?;
 
     // Initialize the SGP4 parameters
-    Ok(init_sgp4(&gp, None))
+    init_sgp4(&gp, None).map_err(GpError::Sgp4)
 }
 
 /// Builds a vector of [`Sgp4`] structs from a string containing Two-Line Element (TLE) sets.
@@ -514,7 +526,7 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Result<S
 ///
 /// # Returns
 /// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 parameters
-/// * `Err(GpError)` - If a TLE in the string cannot be parsed
+/// * `Err(GpError)` - If a TLE in the string cannot be parsed or SGP4 initialization fails
 ///
 /// # Errors
 /// * [`GpError::InvalidTleLine0`] - If an optional name line is empty or longer than 24 characters
@@ -522,9 +534,7 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Result<S
 /// * [`GpError::InvalidTleLine2`] - If a line 2 is not 69 characters or a field cannot be parsed
 /// * [`GpError::InvalidTleEpoch`] - If an epoch cannot be converted to a UTC datetime
 /// * [`GpError::MismatchedTleCatalog`] - If a TLE has different NORAD catalog numbers on line 1 and line 2
-///
-/// # Panics
-/// * If SGP4 initialization fails
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -606,7 +616,7 @@ pub fn from_tle_string(tle_string: &str) -> Result<Vec<Sgp4>, GpError> {
 ///
 /// # Returns
 /// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 structs
-/// * `Err(GpError)` - If the file cannot be read or a TLE cannot be parsed
+/// * `Err(GpError)` - If the file cannot be read, a TLE cannot be parsed, or SGP4 initialization fails
 ///
 /// # Errors
 /// * [`GpError::Io`] - If the file cannot be read
@@ -615,9 +625,7 @@ pub fn from_tle_string(tle_string: &str) -> Result<Vec<Sgp4>, GpError> {
 /// * [`GpError::InvalidTleLine2`] - If a line 2 is not 69 characters or a field cannot be parsed
 /// * [`GpError::InvalidTleEpoch`] - If an epoch cannot be converted to a UTC datetime
 /// * [`GpError::MismatchedTleCatalog`] - If a TLE has different NORAD catalog numbers on line 1 and line 2
-///
-/// # Panics
-/// * If SGP4 initialization fails
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -1309,10 +1317,13 @@ pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) -> Result<(), GpError> {
 /// * `lines` - The KVN key-value lines of one OMM record
 ///
 /// # Returns
-/// * [`Sgp4`] - Struct containing the parsed SGP4 parameters
+/// * `Ok(Sgp4)` - Struct containing the parsed SGP4 parameters
+/// * `Err(GpError)` - If a field cannot be parsed or SGP4 initialization fails
 ///
-/// # Panics
-/// * If a present field cannot be parsed as the requested type
+/// # Errors
+/// * [`GpError::InvalidOmmField`] - If a present field cannot be parsed as the requested type
+/// * [`GpError::InvalidOmmEpoch`] - If EPOCH cannot be parsed as a UTC datetime
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -1339,7 +1350,7 @@ pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) -> Result<(), GpError> {
 /// let lines: Vec<&str> = omm.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
 ///
 /// // Parse the OMM lines into an SGP4 propagator
-/// let sgp4 = from_omm_kvn_lines(&lines);
+/// let sgp4 = from_omm_kvn_lines(&lines).unwrap();
 ///
 /// // Assert the catalog number and name
 /// assert_eq!(sgp4.gp.satellite_catalog_number, 69097);
@@ -1350,7 +1361,7 @@ pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) -> Result<(), GpError> {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
-pub fn from_omm_kvn_lines(lines: &[&str]) -> Sgp4 {
+pub fn from_omm_kvn_lines(lines: &[&str]) -> Result<Sgp4, GpError> {
     sgp4_from_omm_lookup(|field| kvn_lookup(lines, field))
 }
 
@@ -1365,10 +1376,13 @@ pub fn from_omm_kvn_lines(lines: &[&str]) -> Sgp4 {
 /// * `omm_kvn_string` - A string containing one or more OMM records in KVN format
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 parameters
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 parameters
+/// * `Err(GpError)` - If a field cannot be parsed or SGP4 initialization fails
 ///
-/// # Panics
-/// * If a present OMM field cannot be parsed
+/// # Errors
+/// * [`GpError::InvalidOmmField`] - If a present field cannot be parsed as the requested type
+/// * [`GpError::InvalidOmmEpoch`] - If EPOCH cannot be parsed as a UTC datetime
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -1397,7 +1411,7 @@ pub fn from_omm_kvn_lines(lines: &[&str]) -> Sgp4 {
 /// ";
 ///
 /// // Parse the OMM string into SGP4 propagators
-/// let sgp4s = from_omm_kvn_string(omm);
+/// let sgp4s = from_omm_kvn_string(omm).unwrap();
 ///
 /// // Assert the catalog number and name
 /// assert_eq!(sgp4s.len(), 1);
@@ -1409,7 +1423,7 @@ pub fn from_omm_kvn_lines(lines: &[&str]) -> Sgp4 {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
-pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
+pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Result<Vec<Sgp4>, GpError> {
     // Split the string into individual OMM records
     let mut sgp4s = Vec::new();
     let mut current_lines: Vec<&str> = Vec::new();
@@ -1423,7 +1437,7 @@ pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
 
         // A new CCSDS_OMM_VERS line starts the next concatenated record
         if trimmed.to_ascii_uppercase().starts_with("CCSDS_OMM_VERS") && !current_lines.is_empty() {
-            let sgp4 = from_omm_kvn_lines(&current_lines);
+            let sgp4 = from_omm_kvn_lines(&current_lines)?;
             sgp4s.push(sgp4);
             current_lines.clear();
         }
@@ -1433,12 +1447,12 @@ pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
 
     // Parse the final record
     if !current_lines.is_empty() {
-        let sgp4 = from_omm_kvn_lines(&current_lines);
+        let sgp4 = from_omm_kvn_lines(&current_lines)?;
         sgp4s.push(sgp4);
     }
 
     // Return vector of SGP4 structs
-    sgp4s
+    Ok(sgp4s)
 }
 
 /// Builds a vector of [`Sgp4`] structs from a file containing Orbit Mean-Elements Message
@@ -1451,11 +1465,14 @@ pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
 /// * `omm_kvn_file_path` - A path to a file containing one or more OMM records in KVN format
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 structs
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 structs
+/// * `Err(GpError)` - If the file cannot be read or an OMM cannot be parsed
 ///
-/// # Panics
-/// * If the file cannot be read
-/// * If a present OMM field cannot be parsed
+/// # Errors
+/// * [`GpError::Io`] - If the file cannot be read
+/// * [`GpError::InvalidOmmField`] - If a present field cannot be parsed as the requested type
+/// * [`GpError::InvalidOmmEpoch`] - If EPOCH cannot be parsed as a UTC datetime
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -1484,7 +1501,7 @@ pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
 /// std::fs::write(&path, omm).unwrap();
 ///
 /// // Parse the OMM file into SGP4 propagators
-/// let sgp4s = from_omm_kvn_file(path.to_str().unwrap());
+/// let sgp4s = from_omm_kvn_file(path.to_str().unwrap()).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -1499,9 +1516,10 @@ pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Vec<Sgp4> {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
-pub fn from_omm_kvn_file(omm_kvn_file_path: &str) -> Vec<Sgp4> {
+pub fn from_omm_kvn_file(omm_kvn_file_path: &str) -> Result<Vec<Sgp4>, GpError> {
     // Open the OMM KVN file
-    let omm_kvn_string = fs::read_to_string(omm_kvn_file_path).expect("Cannot read OMM KVN file");
+    let omm_kvn_string =
+        fs::read_to_string(omm_kvn_file_path).map_err(|err| GpError::Io(err.to_string()))?;
 
     // Parse OMM string into a vector of SGP4 structs
     from_omm_kvn_string(&omm_kvn_string)
@@ -1518,12 +1536,10 @@ pub fn from_omm_kvn_file(omm_kvn_file_path: &str) -> Vec<Sgp4> {
 /// * `field` - The KVN keyword to look up
 ///
 /// # Returns
-/// * The parsed value as the requested type
-///
-/// # Panics
-/// * If a present field cannot be parsed as the requested type
+/// * `Ok(T)` - The parsed value as the requested type
+/// * `Err(GpError)` - If a present field cannot be parsed
 #[cfg(test)]
-fn kvn_parse<T: FromOmm>(lines: &[&str], field: &str) -> T {
+fn kvn_parse<T: FromOmm>(lines: &[&str], field: &str) -> Result<T, GpError> {
     omm_typed_value(kvn_lookup(lines, field), field)
 }
 
@@ -1569,14 +1585,12 @@ fn kvn_lookup(lines: &[&str], field: &str) -> Option<String> {
 /// * `field` - The OMM keyword name, used in parse error messages
 ///
 /// # Returns
-/// * The parsed value as the requested type
-///
-/// # Panics
-/// * If a present field cannot be parsed as the requested type
-fn omm_typed_value<T: FromOmm>(value: Option<String>, field: &str) -> T {
+/// * `Ok(T)` - The parsed value as the requested type
+/// * `Err(GpError)` - If a present field cannot be parsed
+fn omm_typed_value<T: FromOmm>(value: Option<String>, field: &str) -> Result<T, GpError> {
     match value {
         Some(v) if !v.is_empty() => T::from_omm(field, &v),
-        _ => T::omm_default(),
+        _ => Ok(T::omm_default()),
     }
 }
 
@@ -1591,46 +1605,44 @@ fn omm_typed_value<T: FromOmm>(value: Option<String>, field: &str) -> T {
 /// * `lookup` - Returns the text of one OMM keyword, if present
 ///
 /// # Returns
-/// * [`Sgp4`] - Struct containing the parsed SGP4 parameters
-///
-/// # Panics
-/// * If a present field cannot be parsed as the requested type
-fn sgp4_from_omm_lookup<F>(lookup: F) -> Sgp4
+/// * `Ok(Sgp4)` - Struct containing the parsed SGP4 parameters
+/// * `Err(GpError)` - If a field cannot be parsed or SGP4 initialization fails
+fn sgp4_from_omm_lookup<F>(lookup: F) -> Result<Sgp4, GpError>
 where
     F: Fn(&str) -> Option<String>,
 {
     // Create a General Perturbation Element Set struct
     let gp = GenPerturbElementSet {
-        common_name: omm_typed_value(lookup("OBJECT_NAME"), "OBJECT_NAME"),
-        satellite_catalog_number: omm_typed_value(lookup("NORAD_CAT_ID"), "NORAD_CAT_ID"),
-        classification: omm_typed_value(lookup("CLASSIFICATION_TYPE"), "CLASSIFICATION_TYPE"),
-        international_designator: omm_typed_value(lookup("OBJECT_ID"), "OBJECT_ID"),
-        epoch_datetime: omm_typed_value(lookup("EPOCH"), "EPOCH"),
+        common_name: omm_typed_value(lookup("OBJECT_NAME"), "OBJECT_NAME")?,
+        satellite_catalog_number: omm_typed_value(lookup("NORAD_CAT_ID"), "NORAD_CAT_ID")?,
+        classification: omm_typed_value(lookup("CLASSIFICATION_TYPE"), "CLASSIFICATION_TYPE")?,
+        international_designator: omm_typed_value(lookup("OBJECT_ID"), "OBJECT_ID")?,
+        epoch_datetime: omm_typed_value(lookup("EPOCH"), "EPOCH")?,
         first_derivative_of_mean_motion: omm_typed_value::<f64>(
             lookup("MEAN_MOTION_DOT"),
             "MEAN_MOTION_DOT",
-        ) * 2.0,
+        )? * 2.0,
         second_derivative_of_mean_motion: omm_typed_value::<f64>(
             lookup("MEAN_MOTION_DDOT"),
             "MEAN_MOTION_DDOT",
-        ) * 6.0,
-        bstar: omm_typed_value(lookup("BSTAR"), "BSTAR"),
-        ephemeris_type: omm_typed_value(lookup("EPHEMERIS_TYPE"), "EPHEMERIS_TYPE"),
-        element_set_number: omm_typed_value(lookup("ELEMENT_SET_NO"), "ELEMENT_SET_NO"),
-        inclination: omm_typed_value(lookup("INCLINATION"), "INCLINATION"),
+        )? * 6.0,
+        bstar: omm_typed_value(lookup("BSTAR"), "BSTAR")?,
+        ephemeris_type: omm_typed_value(lookup("EPHEMERIS_TYPE"), "EPHEMERIS_TYPE")?,
+        element_set_number: omm_typed_value(lookup("ELEMENT_SET_NO"), "ELEMENT_SET_NO")?,
+        inclination: omm_typed_value(lookup("INCLINATION"), "INCLINATION")?,
         right_ascension_of_ascending_node: omm_typed_value(
             lookup("RA_OF_ASC_NODE"),
             "RA_OF_ASC_NODE",
-        ),
-        eccentricity: omm_typed_value(lookup("ECCENTRICITY"), "ECCENTRICITY"),
-        argument_of_perigee: omm_typed_value(lookup("ARG_OF_PERICENTER"), "ARG_OF_PERICENTER"),
-        mean_anomaly: omm_typed_value(lookup("MEAN_ANOMALY"), "MEAN_ANOMALY"),
-        mean_motion: omm_typed_value(lookup("MEAN_MOTION"), "MEAN_MOTION"),
-        revolution_number_at_epoch: omm_typed_value(lookup("REV_AT_EPOCH"), "REV_AT_EPOCH"),
+        )?,
+        eccentricity: omm_typed_value(lookup("ECCENTRICITY"), "ECCENTRICITY")?,
+        argument_of_perigee: omm_typed_value(lookup("ARG_OF_PERICENTER"), "ARG_OF_PERICENTER")?,
+        mean_anomaly: omm_typed_value(lookup("MEAN_ANOMALY"), "MEAN_ANOMALY")?,
+        mean_motion: omm_typed_value(lookup("MEAN_MOTION"), "MEAN_MOTION")?,
+        revolution_number_at_epoch: omm_typed_value(lookup("REV_AT_EPOCH"), "REV_AT_EPOCH")?,
     };
 
     // Initialize the SGP4 parameters
-    init_sgp4(&gp, None)
+    init_sgp4(&gp, None).map_err(GpError::Sgp4)
 }
 
 /// Clean a KVN value string
@@ -1930,9 +1942,9 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
 /// ";
 ///
 /// // Parse, export, and parse again
-/// let sgp4s = from_omm_kvn_string(omm);
+/// let sgp4s = from_omm_kvn_string(omm).unwrap();
 /// let exported = to_omm_kvn_string(&sgp4s);
-/// let reparsed = from_omm_kvn_string(&exported);
+/// let reparsed = from_omm_kvn_string(&exported).unwrap();
 ///
 /// // Assert the round-trip catalog number and name
 /// assert_eq!(reparsed.len(), 1);
@@ -1963,8 +1975,12 @@ pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
 /// * `sgp4s` - The SGP4 structs to export
 /// * `omm_kvn_file_path` - Destination path for the KVN file
 ///
-/// # Panics
-/// * If the file cannot be written
+/// # Returns
+/// * `Ok(())` - If the file is written
+/// * `Err(GpError)` - If the file cannot be written
+///
+/// # Errors
+/// * [`GpError::Io`] - If the file cannot be written
 ///
 /// # Examples
 /// ```rust
@@ -1987,15 +2003,15 @@ pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
 /// MEAN_MOTION_DOT = .6535E-4
 /// MEAN_MOTION_DDOT = 0
 /// ";
-/// let sgp4s = from_omm_kvn_string(omm);
+/// let sgp4s = from_omm_kvn_string(omm).unwrap();
 ///
 /// // Write the element sets to a temporary KVN file
 /// let path = std::env::temp_dir().join("mako_sgp4_to_omm_kvn_file.txt");
 /// let path_str = path.to_str().unwrap();
-/// to_omm_kvn_file(&sgp4s, path_str);
+/// to_omm_kvn_file(&sgp4s, path_str).unwrap();
 ///
 /// // Parse the written file
-/// let reparsed = from_omm_kvn_file(path_str);
+/// let reparsed = from_omm_kvn_file(path_str).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -2010,10 +2026,11 @@ pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
-pub fn to_omm_kvn_file(sgp4s: &[Sgp4], omm_kvn_file_path: &str) {
+pub fn to_omm_kvn_file(sgp4s: &[Sgp4], omm_kvn_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the KVN file
     let omm_kvn_string = to_omm_kvn_string(sgp4s);
-    fs::write(omm_kvn_file_path, omm_kvn_string).expect("Cannot write OMM KVN file");
+    fs::write(omm_kvn_file_path, omm_kvn_string).map_err(|err| GpError::Io(err.to_string()))?;
+    Ok(())
 }
 
 /// Collect leaf OMM keyword values from one XML omm element
@@ -2065,11 +2082,14 @@ fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
 /// * `omm_xml_string` - A string containing one or more OMM records in XML format
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 parameters
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 parameters
+/// * `Err(GpError)` - If the XML document or a field cannot be parsed
 ///
-/// # Panics
-/// * If the XML document cannot be parsed
-/// * If a present OMM field cannot be parsed
+/// # Errors
+/// * [`GpError::InvalidOmmXml`] - If the XML document cannot be parsed
+/// * [`GpError::InvalidOmmField`] - If a present field cannot be parsed as the requested type
+/// * [`GpError::InvalidOmmEpoch`] - If EPOCH cannot be parsed as a UTC datetime
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -2104,7 +2124,7 @@ fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
 /// </segment></body></omm></ndm>"#;
 ///
 /// // Parse the OMM XML into SGP4 propagators
-/// let sgp4s = from_omm_xml_string(omm);
+/// let sgp4s = from_omm_xml_string(omm).unwrap();
 ///
 /// // Assert the catalog number and name
 /// assert_eq!(sgp4s.len(), 1);
@@ -2117,11 +2137,9 @@ fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "xml")]
-pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
+pub fn from_omm_xml_string(omm_xml_string: &str) -> Result<Vec<Sgp4>, GpError> {
     // Parse the XML document
-    let doc = Document::parse(omm_xml_string).unwrap_or_else(|err| {
-        panic!("Cannot parse OMM XML: {}", err);
-    });
+    let doc = Document::parse(omm_xml_string).map_err(|_| GpError::InvalidOmmXml)?;
 
     // Each omm element is one GP record
     let mut sgp4s = Vec::new();
@@ -2134,12 +2152,12 @@ pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
         }
 
         let fields = xml_omm_fields(node);
-        let sgp4 = sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned());
+        let sgp4 = sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned())?;
         sgp4s.push(sgp4);
     }
 
     // Return vector of SGP4 structs
-    sgp4s
+    Ok(sgp4s)
 }
 
 /// Builds a vector of [`Sgp4`] structs from a file containing Orbit Mean-Elements Message
@@ -2152,12 +2170,15 @@ pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
 /// * `omm_xml_file_path` - A path to a file containing one or more OMM records in XML format
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 structs
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 structs
+/// * `Err(GpError)` - If the file cannot be read or the XML cannot be parsed
 ///
-/// # Panics
-/// * If the file cannot be read
-/// * If the XML document cannot be parsed
-/// * If a present OMM field cannot be parsed
+/// # Errors
+/// * [`GpError::Io`] - If the file cannot be read
+/// * [`GpError::InvalidOmmXml`] - If the XML document cannot be parsed
+/// * [`GpError::InvalidOmmField`] - If a present field cannot be parsed as the requested type
+/// * [`GpError::InvalidOmmEpoch`] - If EPOCH cannot be parsed as a UTC datetime
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -2192,7 +2213,7 @@ pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
 /// std::fs::write(&path, omm).unwrap();
 ///
 /// // Parse the OMM file into SGP4 propagators
-/// let sgp4s = from_omm_xml_file(path.to_str().unwrap());
+/// let sgp4s = from_omm_xml_file(path.to_str().unwrap()).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -2208,9 +2229,10 @@ pub fn from_omm_xml_string(omm_xml_string: &str) -> Vec<Sgp4> {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "xml")]
-pub fn from_omm_xml_file(omm_xml_file_path: &str) -> Vec<Sgp4> {
+pub fn from_omm_xml_file(omm_xml_file_path: &str) -> Result<Vec<Sgp4>, GpError> {
     // Open the OMM XML file
-    let omm_xml_string = fs::read_to_string(omm_xml_file_path).expect("Cannot read OMM XML file");
+    let omm_xml_string =
+        fs::read_to_string(omm_xml_file_path).map_err(|err| GpError::Io(err.to_string()))?;
 
     // Parse OMM string into a vector of SGP4 structs
     from_omm_xml_string(&omm_xml_string)
@@ -2400,9 +2422,9 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
 /// </segment></body></omm></ndm>"#;
 ///
 /// // Parse, export, and parse again
-/// let sgp4s = from_omm_xml_string(omm);
+/// let sgp4s = from_omm_xml_string(omm).unwrap();
 /// let exported = to_omm_xml_string(&sgp4s);
-/// let reparsed = from_omm_xml_string(&exported);
+/// let reparsed = from_omm_xml_string(&exported).unwrap();
 ///
 /// // Assert the round-trip catalog number and name
 /// assert_eq!(reparsed.len(), 1);
@@ -2439,8 +2461,12 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
 /// * `sgp4s` - The SGP4 structs to export
 /// * `omm_xml_file_path` - Destination path for the XML file
 ///
-/// # Panics
-/// * If the file cannot be written
+/// # Returns
+/// * `Ok(())` - If the file is written
+/// * `Err(GpError)` - If the file cannot be written
+///
+/// # Errors
+/// * [`GpError::Io`] - If the file cannot be written
 ///
 /// # Examples
 /// ```rust
@@ -2469,15 +2495,15 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
 /// <MEAN_MOTION_DDOT>0</MEAN_MOTION_DDOT>
 /// </tleParameters></data>
 /// </segment></body></omm></ndm>"#;
-/// let sgp4s = from_omm_xml_string(omm);
+/// let sgp4s = from_omm_xml_string(omm).unwrap();
 ///
 /// // Write the element sets to a temporary XML file
 /// let path = std::env::temp_dir().join("mako_sgp4_to_omm_xml_file.xml");
 /// let path_str = path.to_str().unwrap();
-/// to_omm_xml_file(&sgp4s, path_str);
+/// to_omm_xml_file(&sgp4s, path_str).unwrap();
 ///
 /// // Parse the written file
-/// let reparsed = from_omm_xml_file(path_str);
+/// let reparsed = from_omm_xml_file(path_str).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -2493,10 +2519,11 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "xml")]
-pub fn to_omm_xml_file(sgp4s: &[Sgp4], omm_xml_file_path: &str) {
+pub fn to_omm_xml_file(sgp4s: &[Sgp4], omm_xml_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the XML file
     let omm_xml_string = to_omm_xml_string(sgp4s);
-    fs::write(omm_xml_file_path, omm_xml_string).expect("Cannot write OMM XML file");
+    fs::write(omm_xml_file_path, omm_xml_string).map_err(|err| GpError::Io(err.to_string()))?;
+    Ok(())
 }
 
 /// Build an [`Sgp4`] struct from one JSON OMM object
@@ -2505,14 +2532,11 @@ pub fn to_omm_xml_file(sgp4s: &[Sgp4], omm_xml_file_path: &str) {
 /// * `record` - One OMM record as a JSON object
 ///
 /// # Returns
-/// * [`Sgp4`] - Struct containing the parsed SGP4 parameters
-///
-/// # Panics
-/// * If the JSON value is not an object
-/// * If a present OMM field cannot be parsed
+/// * `Ok(Sgp4)` - Struct containing the parsed SGP4 parameters
+/// * `Err(GpError)` - If the JSON value is not an object or a field cannot be parsed
 #[cfg(feature = "json")]
-fn sgp4_from_json_record(record: &Value) -> Sgp4 {
-    let fields = json_omm_fields(record);
+fn sgp4_from_json_record(record: &Value) -> Result<Sgp4, GpError> {
+    let fields = json_omm_fields(record)?;
     sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned())
 }
 
@@ -2529,12 +2553,14 @@ fn sgp4_from_json_record(record: &Value) -> Sgp4 {
 /// * `omm_json_string` - A string containing one or more OMM records in JSON format
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 parameters
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 parameters
+/// * `Err(GpError)` - If the JSON document or a field cannot be parsed
 ///
-/// # Panics
-/// * If the JSON document cannot be parsed
-/// * If the top-level value is not an object or an array of objects
-/// * If a present OMM field cannot be parsed
+/// # Errors
+/// * [`GpError::InvalidOmmJson`] - If the JSON cannot be parsed or is not an object or array of objects
+/// * [`GpError::InvalidOmmField`] - If a present field cannot be parsed as the requested type
+/// * [`GpError::InvalidOmmEpoch`] - If EPOCH cannot be parsed as a UTC datetime
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -2564,7 +2590,7 @@ fn sgp4_from_json_record(record: &Value) -> Sgp4 {
 /// ]"#;
 ///
 /// // Parse the OMM JSON into SGP4 propagators
-/// let sgp4s = from_omm_json_string(omm);
+/// let sgp4s = from_omm_json_string(omm).unwrap();
 ///
 /// // Assert the catalog number and name
 /// assert_eq!(sgp4s.len(), 1);
@@ -2577,28 +2603,27 @@ fn sgp4_from_json_record(record: &Value) -> Sgp4 {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "json")]
-pub fn from_omm_json_string(omm_json_string: &str) -> Vec<Sgp4> {
+pub fn from_omm_json_string(omm_json_string: &str) -> Result<Vec<Sgp4>, GpError> {
     // Parse the JSON document
-    let value: Value = serde_json::from_str(omm_json_string).unwrap_or_else(|err| {
-        panic!("Cannot parse OMM JSON: {}", err);
-    });
+    let value: Value =
+        serde_json::from_str(omm_json_string).map_err(|_| GpError::InvalidOmmJson)?;
 
     // A file may be one object or an array of objects
     let mut sgp4s = Vec::new();
     match &value {
         Value::Array(records) => {
             for record in records {
-                sgp4s.push(sgp4_from_json_record(record));
+                sgp4s.push(sgp4_from_json_record(record)?);
             }
         }
         Value::Object(_) => {
-            sgp4s.push(sgp4_from_json_record(&value));
+            sgp4s.push(sgp4_from_json_record(&value)?);
         }
-        _ => panic!("OMM JSON must be an object or an array of objects"),
+        _ => return Err(GpError::InvalidOmmJson),
     }
 
     // Return vector of SGP4 structs
-    sgp4s
+    Ok(sgp4s)
 }
 
 /// Collect OMM keyword values from one JSON object
@@ -2611,14 +2636,12 @@ pub fn from_omm_json_string(omm_json_string: &str) -> Vec<Sgp4> {
 /// * `record` - The JSON object to flatten
 ///
 /// # Returns
-/// * A map of OMM keyword to text value
-///
-/// # Panics
-/// * If the JSON value is not an object
+/// * `Ok(HashMap)` - A map of OMM keyword to text value
+/// * `Err(GpError)` - If the JSON value is not an object
 #[cfg(feature = "json")]
-fn json_omm_fields(record: &Value) -> HashMap<String, String> {
+fn json_omm_fields(record: &Value) -> Result<HashMap<String, String>, GpError> {
     let Some(object) = record.as_object() else {
-        panic!("OMM JSON record must be an object");
+        return Err(GpError::InvalidOmmJson);
     };
 
     let mut fields = HashMap::new();
@@ -2638,7 +2661,7 @@ fn json_omm_fields(record: &Value) -> HashMap<String, String> {
         fields.insert(key.to_ascii_uppercase(), text);
     }
 
-    fields
+    Ok(fields)
 }
 
 /// Builds a vector of [`Sgp4`] structs from a file containing Orbit Mean-Elements Message
@@ -2651,13 +2674,15 @@ fn json_omm_fields(record: &Value) -> HashMap<String, String> {
 /// * `omm_json_file_path` - A path to a file containing one or more OMM records in JSON format
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 structs
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 structs
+/// * `Err(GpError)` - If the file cannot be read or the JSON cannot be parsed
 ///
-/// # Panics
-/// * If the file cannot be read
-/// * If the JSON document cannot be parsed
-/// * If the top-level value is not an object or an array of objects
-/// * If a present OMM field cannot be parsed
+/// # Errors
+/// * [`GpError::Io`] - If the file cannot be read
+/// * [`GpError::InvalidOmmJson`] - If the JSON cannot be parsed or is not an object or array of objects
+/// * [`GpError::InvalidOmmField`] - If a present field cannot be parsed as the requested type
+/// * [`GpError::InvalidOmmEpoch`] - If EPOCH cannot be parsed as a UTC datetime
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -2687,7 +2712,7 @@ fn json_omm_fields(record: &Value) -> HashMap<String, String> {
 /// std::fs::write(&path, omm).unwrap();
 ///
 /// // Parse the OMM file into SGP4 propagators
-/// let sgp4s = from_omm_json_file(path.to_str().unwrap());
+/// let sgp4s = from_omm_json_file(path.to_str().unwrap()).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -2703,10 +2728,10 @@ fn json_omm_fields(record: &Value) -> HashMap<String, String> {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "json")]
-pub fn from_omm_json_file(omm_json_file_path: &str) -> Vec<Sgp4> {
+pub fn from_omm_json_file(omm_json_file_path: &str) -> Result<Vec<Sgp4>, GpError> {
     // Open the OMM JSON file
     let omm_json_string =
-        fs::read_to_string(omm_json_file_path).expect("Cannot read OMM JSON file");
+        fs::read_to_string(omm_json_file_path).map_err(|err| GpError::Io(err.to_string()))?;
 
     // Parse OMM string into a vector of SGP4 structs
     from_omm_json_string(&omm_json_string)
@@ -2856,9 +2881,9 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
 /// ]"#;
 ///
 /// // Parse, export, and parse again
-/// let sgp4s = from_omm_json_string(omm);
+/// let sgp4s = from_omm_json_string(omm).unwrap();
 /// let exported = to_omm_json_string(&sgp4s);
-/// let reparsed = from_omm_json_string(&exported);
+/// let reparsed = from_omm_json_string(&exported).unwrap();
 ///
 /// // Assert the round-trip catalog number and name
 /// assert_eq!(reparsed.len(), 1);
@@ -2895,8 +2920,12 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
 /// * `sgp4s` - The SGP4 structs to export
 /// * `omm_json_file_path` - Destination path for the JSON file
 ///
-/// # Panics
-/// * If the file cannot be written
+/// # Returns
+/// * `Ok(())` - If the file is written
+/// * `Err(GpError)` - If the file cannot be written
+///
+/// # Errors
+/// * [`GpError::Io`] - If the file cannot be written
 ///
 /// # Examples
 /// ```rust
@@ -2920,15 +2949,15 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
 /// "MEAN_MOTION_DDOT": 0
 /// }
 /// ]"#;
-/// let sgp4s = from_omm_json_string(omm);
+/// let sgp4s = from_omm_json_string(omm).unwrap();
 ///
 /// // Write the element sets to a temporary JSON file
 /// let path = std::env::temp_dir().join("mako_sgp4_to_omm_json_file.json");
 /// let path_str = path.to_str().unwrap();
-/// to_omm_json_file(&sgp4s, path_str);
+/// to_omm_json_file(&sgp4s, path_str).unwrap();
 ///
 /// // Parse the written file
-/// let reparsed = from_omm_json_file(path_str);
+/// let reparsed = from_omm_json_file(path_str).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -2944,10 +2973,11 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "json")]
-pub fn to_omm_json_file(sgp4s: &[Sgp4], omm_json_file_path: &str) {
+pub fn to_omm_json_file(sgp4s: &[Sgp4], omm_json_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the JSON file
     let omm_json_string = to_omm_json_string(sgp4s);
-    fs::write(omm_json_file_path, omm_json_string).expect("Cannot write OMM JSON file");
+    fs::write(omm_json_file_path, omm_json_string).map_err(|err| GpError::Io(err.to_string()))?;
+    Ok(())
 }
 
 /// Build an [`Sgp4`] struct from one CSV OMM row
@@ -2957,12 +2987,10 @@ pub fn to_omm_json_file(sgp4s: &[Sgp4], omm_json_file_path: &str) {
 /// * `record` - One OMM data row
 ///
 /// # Returns
-/// * [`Sgp4`] - Struct containing the parsed SGP4 parameters
-///
-/// # Panics
-/// * If a present OMM field cannot be parsed
+/// * `Ok(Sgp4)` - Struct containing the parsed SGP4 parameters
+/// * `Err(GpError)` - If a field cannot be parsed
 #[cfg(feature = "csv")]
-fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Sgp4 {
+fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Result<Sgp4, GpError> {
     let fields = csv_omm_fields(headers, record);
     sgp4_from_omm_lookup(|field| fields.get(&field.to_ascii_uppercase()).cloned())
 }
@@ -2979,11 +3007,14 @@ fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Sgp4 
 /// * `omm_csv_string` - A string containing one or more OMM records in CSV format
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 parameters
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 parameters
+/// * `Err(GpError)` - If the CSV document or a field cannot be parsed
 ///
-/// # Panics
-/// * If the CSV document cannot be parsed
-/// * If a present OMM field cannot be parsed
+/// # Errors
+/// * [`GpError::InvalidOmmCsv`] - If the CSV document cannot be parsed
+/// * [`GpError::InvalidOmmField`] - If a present field cannot be parsed as the requested type
+/// * [`GpError::InvalidOmmEpoch`] - If EPOCH cannot be parsed as a UTC datetime
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -2996,7 +3027,7 @@ fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Sgp4 
 /// ";
 ///
 /// // Parse the OMM CSV into SGP4 propagators
-/// let sgp4s = from_omm_csv_string(omm);
+/// let sgp4s = from_omm_csv_string(omm).unwrap();
 ///
 /// // Assert the catalog number and name
 /// assert_eq!(sgp4s.len(), 1);
@@ -3009,7 +3040,7 @@ fn sgp4_from_csv_record(headers: &[String], record: &csv::StringRecord) -> Sgp4 
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "csv")]
-pub fn from_omm_csv_string(omm_csv_string: &str) -> Vec<Sgp4> {
+pub fn from_omm_csv_string(omm_csv_string: &str) -> Result<Vec<Sgp4>, GpError> {
     // Parse the CSV document, using the first row as OMM keywords
     let mut reader = ReaderBuilder::new()
         .has_headers(true)
@@ -3017,9 +3048,7 @@ pub fn from_omm_csv_string(omm_csv_string: &str) -> Vec<Sgp4> {
 
     let headers: Vec<String> = reader
         .headers()
-        .unwrap_or_else(|err| {
-            panic!("Cannot parse OMM CSV headers: {}", err);
-        })
+        .map_err(|_| GpError::InvalidOmmCsv)?
         .iter()
         .map(|header| header.trim().to_ascii_uppercase())
         .collect();
@@ -3027,14 +3056,12 @@ pub fn from_omm_csv_string(omm_csv_string: &str) -> Vec<Sgp4> {
     // Each data row is one GP record
     let mut sgp4s = Vec::new();
     for result in reader.records() {
-        let record = result.unwrap_or_else(|err| {
-            panic!("Cannot parse OMM CSV: {}", err);
-        });
-        sgp4s.push(sgp4_from_csv_record(&headers, &record));
+        let record = result.map_err(|_| GpError::InvalidOmmCsv)?;
+        sgp4s.push(sgp4_from_csv_record(&headers, &record)?);
     }
 
     // Return vector of SGP4 structs
-    sgp4s
+    Ok(sgp4s)
 }
 
 /// Collect OMM keyword values from one CSV row
@@ -3074,12 +3101,15 @@ fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<Str
 /// * `omm_csv_file_path` - A path to a file containing one or more OMM records in CSV format
 ///
 /// # Returns
-/// * `Vec<Sgp4>` - A vector containing all successfully parsed SGP4 structs
+/// * `Ok(Vec<Sgp4>)` - All successfully parsed SGP4 structs
+/// * `Err(GpError)` - If the file cannot be read or the CSV cannot be parsed
 ///
-/// # Panics
-/// * If the file cannot be read
-/// * If the CSV document cannot be parsed
-/// * If a present OMM field cannot be parsed
+/// # Errors
+/// * [`GpError::Io`] - If the file cannot be read
+/// * [`GpError::InvalidOmmCsv`] - If the CSV document cannot be parsed
+/// * [`GpError::InvalidOmmField`] - If a present field cannot be parsed as the requested type
+/// * [`GpError::InvalidOmmEpoch`] - If EPOCH cannot be parsed as a UTC datetime
+/// * [`GpError::Sgp4`] - If SGP4 initialization fails
 ///
 /// # Examples
 /// ```rust
@@ -3096,7 +3126,7 @@ fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<Str
 /// std::fs::write(&path, omm).unwrap();
 ///
 /// // Parse the OMM file into SGP4 propagators
-/// let sgp4s = from_omm_csv_file(path.to_str().unwrap());
+/// let sgp4s = from_omm_csv_file(path.to_str().unwrap()).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -3112,9 +3142,10 @@ fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<Str
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "csv")]
-pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Vec<Sgp4> {
+pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Result<Vec<Sgp4>, GpError> {
     // Open the OMM CSV file
-    let omm_csv_string = fs::read_to_string(omm_csv_file_path).expect("Cannot read OMM CSV file");
+    let omm_csv_string =
+        fs::read_to_string(omm_csv_file_path).map_err(|err| GpError::Io(err.to_string()))?;
 
     // Parse OMM string into a vector of SGP4 structs
     from_omm_csv_string(&omm_csv_string)
@@ -3173,7 +3204,7 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
 /// * `String` - A CSV document with a header row and one row per record
 ///
 /// # Panics
-/// * If the CSV document cannot be written
+/// * If the in-memory CSV writer fails
 ///
 /// # Examples
 /// ```rust
@@ -3186,9 +3217,9 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
 /// ";
 ///
 /// // Parse, export, and parse again
-/// let sgp4s = from_omm_csv_string(omm);
+/// let sgp4s = from_omm_csv_string(omm).unwrap();
 /// let exported = to_omm_csv_string(&sgp4s);
-/// let reparsed = from_omm_csv_string(&exported);
+/// let reparsed = from_omm_csv_string(&exported).unwrap();
 ///
 /// // Assert the round-trip catalog number and name
 /// assert_eq!(reparsed.len(), 1);
@@ -3226,8 +3257,12 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
 /// * `sgp4s` - The SGP4 structs to export
 /// * `omm_csv_file_path` - Destination path for the CSV file
 ///
-/// # Panics
-/// * If the file cannot be written
+/// # Returns
+/// * `Ok(())` - If the file is written
+/// * `Err(GpError)` - If the file cannot be written
+///
+/// # Errors
+/// * [`GpError::Io`] - If the file cannot be written
 ///
 /// # Examples
 /// ```rust
@@ -3238,15 +3273,15 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
 /// OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,NORAD_CAT_ID,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT
 /// 2026-106A,2026-106A,2026-06-14T15:07:48.259488,15.11169557,.00147468,97.5103,247.7605,169.6213,190.5325,69097,.39221734E-3,.6535E-4,0
 /// ";
-/// let sgp4s = from_omm_csv_string(omm);
+/// let sgp4s = from_omm_csv_string(omm).unwrap();
 ///
 /// // Write the element sets to a temporary CSV file
 /// let path = std::env::temp_dir().join("mako_sgp4_to_omm_csv_file.csv");
 /// let path_str = path.to_str().unwrap();
-/// to_omm_csv_file(&sgp4s, path_str);
+/// to_omm_csv_file(&sgp4s, path_str).unwrap();
 ///
 /// // Parse the written file
-/// let reparsed = from_omm_csv_file(path_str);
+/// let reparsed = from_omm_csv_file(path_str).unwrap();
 ///
 /// // Remove the temporary file
 /// let _ = std::fs::remove_file(&path);
@@ -3262,10 +3297,11 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "csv")]
-pub fn to_omm_csv_file(sgp4s: &[Sgp4], omm_csv_file_path: &str) {
+pub fn to_omm_csv_file(sgp4s: &[Sgp4], omm_csv_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the CSV file
     let omm_csv_string = to_omm_csv_string(sgp4s);
-    fs::write(omm_csv_file_path, omm_csv_string).expect("Cannot write OMM CSV file");
+    fs::write(omm_csv_file_path, omm_csv_string).map_err(|err| GpError::Io(err.to_string()))?;
+    Ok(())
 }
 
 /// Parse an OMM EPOCH string into a UTC DateTime
@@ -3277,11 +3313,9 @@ pub fn to_omm_csv_file(sgp4s: &[Sgp4], omm_csv_file_path: &str) {
 /// * `epoch` - The EPOCH string from the OMM record
 ///
 /// # Returns
-/// * [`DateTime`] - The epoch as a UTC datetime
-///
-/// # Panics
-/// * If the EPOCH string cannot be parsed
-fn parse_omm_epoch(epoch: &str) -> DateTime {
+/// * `Ok(DateTime)` - The epoch as a UTC datetime
+/// * `Err(GpError)` - If the EPOCH string cannot be parsed
+fn parse_omm_epoch(epoch: &str) -> Result<DateTime, GpError> {
     // Strip a trailing Z timezone marker
     let mut s = epoch.trim();
     if s.ends_with('Z') || s.ends_with('z') {
@@ -3294,36 +3328,38 @@ fn parse_omm_epoch(epoch: &str) -> DateTime {
     } else if let Some((date, time)) = s.split_once(' ') {
         (date, time)
     } else {
-        panic!("OMM EPOCH is invalid: {}", epoch);
+        return Err(GpError::InvalidOmmEpoch);
     };
 
     let date_parts: Vec<&str> = date.split('-').collect();
     let time_parts: Vec<&str> = time.split(':').collect();
     if date_parts.len() != 3 || time_parts.len() != 3 {
-        panic!("OMM EPOCH is invalid: {}", epoch);
+        return Err(GpError::InvalidOmmEpoch);
     }
 
     // Parse calendar date
-    let year = date_parts[0].parse::<i32>().unwrap_or_else(|_| {
-        panic!("OMM EPOCH year is invalid: {}", epoch);
-    });
-    let month = date_parts[1].parse::<i32>().unwrap_or_else(|_| {
-        panic!("OMM EPOCH month is invalid: {}", epoch);
-    });
-    let day = date_parts[2].parse::<i32>().unwrap_or_else(|_| {
-        panic!("OMM EPOCH day is invalid: {}", epoch);
-    });
+    let year = date_parts[0]
+        .parse::<i32>()
+        .map_err(|_| GpError::InvalidOmmEpoch)?;
+    let month = date_parts[1]
+        .parse::<i32>()
+        .map_err(|_| GpError::InvalidOmmEpoch)?;
+    let day = date_parts[2]
+        .parse::<i32>()
+        .map_err(|_| GpError::InvalidOmmEpoch)?;
 
     // Parse clock time
-    let hour = time_parts[0].parse::<i32>().unwrap_or_else(|_| {
-        panic!("OMM EPOCH hour is invalid: {}", epoch);
-    });
-    let minute = time_parts[1].parse::<i32>().unwrap_or_else(|_| {
-        panic!("OMM EPOCH minute is invalid: {}", epoch);
-    });
-    let second = f64::from_omm("EPOCH second", time_parts[2]);
+    let hour = time_parts[0]
+        .parse::<i32>()
+        .map_err(|_| GpError::InvalidOmmEpoch)?;
+    let minute = time_parts[1]
+        .parse::<i32>()
+        .map_err(|_| GpError::InvalidOmmEpoch)?;
+    let second = time_parts[2]
+        .parse::<f64>()
+        .map_err(|_| GpError::InvalidOmmEpoch)?;
 
-    DateTime {
+    Ok(DateTime {
         year,
         month,
         day,
@@ -3331,7 +3367,7 @@ fn parse_omm_epoch(epoch: &str) -> DateTime {
         minute,
         second,
         timezone: Timezone::UTC,
-    }
+    })
 }
 
 // ----------
@@ -3411,6 +3447,93 @@ mod tests {
             Ok(_) => panic!("expected InvalidTLELine"),
         };
         assert_eq!(err, GpError::InvalidTLELine);
+    }
+
+    #[test]
+    fn test_invalid_omm_field() {
+        let err = match from_omm_kvn_string("MEAN_MOTION = not_a_number") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmField"),
+        };
+        assert_eq!(err, GpError::InvalidOmmField);
+
+        let err = match from_omm_kvn_string("NORAD_CAT_ID = abc") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmField"),
+        };
+        assert_eq!(err, GpError::InvalidOmmField);
+    }
+
+    #[test]
+    fn test_invalid_omm_epoch() {
+        let err = match from_omm_kvn_string("EPOCH = not-an-epoch") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmEpoch"),
+        };
+        assert_eq!(err, GpError::InvalidOmmEpoch);
+
+        let err = match from_omm_kvn_string("EPOCH = 2026-06-14") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmEpoch"),
+        };
+        assert_eq!(err, GpError::InvalidOmmEpoch);
+
+        let err = match from_omm_kvn_string("EPOCH = 2026-06-14Txx:00:00") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmEpoch"),
+        };
+        assert_eq!(err, GpError::InvalidOmmEpoch);
+    }
+
+    #[cfg(feature = "xml")]
+    #[test]
+    fn test_invalid_omm_xml() {
+        let err = match from_omm_xml_string("<<<not xml") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmXml"),
+        };
+        assert_eq!(err, GpError::InvalidOmmXml);
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn test_invalid_omm_json() {
+        let err = match from_omm_json_string("not json") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmJson"),
+        };
+        assert_eq!(err, GpError::InvalidOmmJson);
+
+        let err = match from_omm_json_string("1") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmJson"),
+        };
+        assert_eq!(err, GpError::InvalidOmmJson);
+
+        let err = match from_omm_json_string("[1]") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmJson"),
+        };
+        assert_eq!(err, GpError::InvalidOmmJson);
+    }
+
+    #[cfg(feature = "csv")]
+    #[test]
+    fn test_invalid_omm_csv() {
+        let err = match from_omm_csv_string("OBJECT_NAME,MEAN_MOTION\nonly_one_field") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidOmmCsv"),
+        };
+        assert_eq!(err, GpError::InvalidOmmCsv);
+    }
+
+    #[test]
+    fn test_omm_file_io_error() {
+        let err = match from_omm_kvn_file("test/this_omm_file_does_not_exist.txt") {
+            Err(err) => err,
+            Ok(_) => panic!("expected GpError::Io"),
+        };
+        assert!(matches!(err, GpError::Io(_)));
     }
 
     #[test]
@@ -3803,7 +3926,7 @@ mod tests {
         }
     }
 
-    fn sgp4_from_case_omm(omm_kvn: &str) -> Sgp4 {
+    fn sgp4_from_case_omm(omm_kvn: &str) -> Result<Sgp4, GpError> {
         let lines: Vec<&str> = omm_kvn
             .lines()
             .map(str::trim)
@@ -3815,7 +3938,8 @@ mod tests {
     #[test]
     fn test_omm_kvn_parsing_cases() {
         let cases = load_omm_parsing_cases();
-        let from_file = from_omm_kvn_file("test/omm_parsing_cases.txt");
+        let from_file = from_omm_kvn_file("test/omm_parsing_cases.txt")
+            .expect("could not parse test/omm_parsing_cases.txt");
         let expected_file_count = cases.test.values().filter(|c| !c.exception).count();
         assert_eq!(
             from_file.len(),
@@ -3827,25 +3951,33 @@ mod tests {
             let case = &cases.test[key];
 
             if case.exception {
-                let lines_result = std::panic::catch_unwind(|| sgp4_from_case_omm(&case.omm_kvn));
                 assert!(
-                    lines_result.is_err(),
-                    "case {key} ({}): expected from_omm_kvn_lines to panic",
+                    sgp4_from_case_omm(&case.omm_kvn).is_err(),
+                    "case {key} ({}): expected from_omm_kvn_lines to return Err",
                     case.name
                 );
-                let string_result = std::panic::catch_unwind(|| from_omm_kvn_string(&case.omm_kvn));
                 assert!(
-                    string_result.is_err(),
-                    "case {key} ({}): expected from_omm_kvn_string to panic",
+                    from_omm_kvn_string(&case.omm_kvn).is_err(),
+                    "case {key} ({}): expected from_omm_kvn_string to return Err",
                     case.name
                 );
                 continue;
             }
 
-            let from_lines = sgp4_from_case_omm(&case.omm_kvn);
+            let from_lines = sgp4_from_case_omm(&case.omm_kvn).unwrap_or_else(|err| {
+                panic!(
+                    "case {key} ({}): from_omm_kvn_lines failed: {err:?}",
+                    case.name
+                )
+            });
             assert_gp_matches(key, &case.name, "from_omm_kvn_lines", &from_lines.gp, case);
 
-            let from_string = from_omm_kvn_string(&case.omm_kvn);
+            let from_string = from_omm_kvn_string(&case.omm_kvn).unwrap_or_else(|err| {
+                panic!(
+                    "case {key} ({}): from_omm_kvn_string failed: {err:?}",
+                    case.name
+                )
+            });
             assert_eq!(
                 from_string.len(),
                 1,
@@ -3877,7 +4009,8 @@ mod tests {
     #[test]
     fn test_omm_xml_parsing_cases() {
         let cases = load_omm_parsing_cases();
-        let from_xml_file = from_omm_xml_file("test/omm_parsing_cases.xml");
+        let from_xml_file = from_omm_xml_file("test/omm_parsing_cases.xml")
+            .expect("could not parse test/omm_parsing_cases.xml");
         assert_omm_file_matches_cases(
             &cases,
             &from_xml_file,
@@ -3890,7 +4023,8 @@ mod tests {
     #[test]
     fn test_omm_json_parsing_cases() {
         let cases = load_omm_parsing_cases();
-        let from_json_file = from_omm_json_file("test/omm_parsing_cases.json");
+        let from_json_file = from_omm_json_file("test/omm_parsing_cases.json")
+            .expect("could not parse test/omm_parsing_cases.json");
         assert_omm_file_matches_cases(
             &cases,
             &from_json_file,
@@ -3903,7 +4037,8 @@ mod tests {
     #[test]
     fn test_omm_csv_parsing_cases() {
         let cases = load_omm_parsing_cases();
-        let from_csv_file = from_omm_csv_file("test/omm_parsing_cases.csv");
+        let from_csv_file = from_omm_csv_file("test/omm_parsing_cases.csv")
+            .expect("could not parse test/omm_parsing_cases.csv");
         assert_omm_file_matches_cases(
             &cases,
             &from_csv_file,
@@ -4031,9 +4166,10 @@ mod tests {
     #[test]
     fn test_omm_kvn_export_string_roundtrip() {
         // Parse the KVN test file, export, and parse the export
-        let original = from_omm_kvn_file("test/omm_parsing_cases.txt");
+        let original = from_omm_kvn_file("test/omm_parsing_cases.txt")
+            .expect("could not parse test/omm_parsing_cases.txt");
         let exported = to_omm_kvn_string(&original);
-        let reparsed = from_omm_kvn_string(&exported);
+        let reparsed = from_omm_kvn_string(&exported).unwrap();
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4044,12 +4180,13 @@ mod tests {
     #[test]
     fn test_omm_kvn_export_file_roundtrip() {
         // Parse the KVN test file and write it back out
-        let original = from_omm_kvn_file("test/omm_parsing_cases.txt");
+        let original = from_omm_kvn_file("test/omm_parsing_cases.txt")
+            .expect("could not parse test/omm_parsing_cases.txt");
         let out_path = export_test_path("omm_kvn.txt");
-        to_omm_kvn_file(&original, &out_path);
+        to_omm_kvn_file(&original, &out_path).expect("could not write exported KVN file");
 
         // Parse the written file and compare GP fields
-        let reparsed = from_omm_kvn_file(&out_path);
+        let reparsed = from_omm_kvn_file(&out_path).expect("could not parse exported KVN file");
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4062,7 +4199,7 @@ mod tests {
     fn test_omm_xml_export_empty() {
         // An empty slice should produce an NDM document with no OMM records
         let exported = to_omm_xml_string(&[]);
-        let reparsed = from_omm_xml_string(&exported);
+        let reparsed = from_omm_xml_string(&exported).unwrap();
         assert!(reparsed.is_empty());
     }
 
@@ -4070,9 +4207,10 @@ mod tests {
     #[test]
     fn test_omm_xml_export_string_roundtrip() {
         // Parse the XML test file, export, and parse the export
-        let original = from_omm_xml_file("test/omm_parsing_cases.xml");
+        let original = from_omm_xml_file("test/omm_parsing_cases.xml")
+            .expect("could not parse test/omm_parsing_cases.xml");
         let exported = to_omm_xml_string(&original);
-        let reparsed = from_omm_xml_string(&exported);
+        let reparsed = from_omm_xml_string(&exported).unwrap();
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4084,12 +4222,13 @@ mod tests {
     #[test]
     fn test_omm_xml_export_file_roundtrip() {
         // Parse the XML test file and write it back out
-        let original = from_omm_xml_file("test/omm_parsing_cases.xml");
+        let original = from_omm_xml_file("test/omm_parsing_cases.xml")
+            .expect("could not parse test/omm_parsing_cases.xml");
         let out_path = export_test_path("omm_xml.xml");
-        to_omm_xml_file(&original, &out_path);
+        to_omm_xml_file(&original, &out_path).expect("could not write exported XML file");
 
         // Parse the written file and compare GP fields
-        let reparsed = from_omm_xml_file(&out_path);
+        let reparsed = from_omm_xml_file(&out_path).expect("could not parse exported XML file");
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4102,7 +4241,7 @@ mod tests {
     fn test_omm_json_export_empty() {
         // An empty slice should produce an empty JSON array
         let exported = to_omm_json_string(&[]);
-        let reparsed = from_omm_json_string(&exported);
+        let reparsed = from_omm_json_string(&exported).unwrap();
         assert!(reparsed.is_empty());
     }
 
@@ -4110,9 +4249,10 @@ mod tests {
     #[test]
     fn test_omm_json_export_string_roundtrip() {
         // Parse the JSON test file, export, and parse the export
-        let original = from_omm_json_file("test/omm_parsing_cases.json");
+        let original = from_omm_json_file("test/omm_parsing_cases.json")
+            .expect("could not parse test/omm_parsing_cases.json");
         let exported = to_omm_json_string(&original);
-        let reparsed = from_omm_json_string(&exported);
+        let reparsed = from_omm_json_string(&exported).unwrap();
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4124,12 +4264,13 @@ mod tests {
     #[test]
     fn test_omm_json_export_file_roundtrip() {
         // Parse the JSON test file and write it back out
-        let original = from_omm_json_file("test/omm_parsing_cases.json");
+        let original = from_omm_json_file("test/omm_parsing_cases.json")
+            .expect("could not parse test/omm_parsing_cases.json");
         let out_path = export_test_path("omm_json.json");
-        to_omm_json_file(&original, &out_path);
+        to_omm_json_file(&original, &out_path).expect("could not write exported JSON file");
 
         // Parse the written file and compare GP fields
-        let reparsed = from_omm_json_file(&out_path);
+        let reparsed = from_omm_json_file(&out_path).expect("could not parse exported JSON file");
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4142,7 +4283,7 @@ mod tests {
     fn test_omm_csv_export_empty() {
         // An empty slice should produce a header-only CSV
         let exported = to_omm_csv_string(&[]);
-        let reparsed = from_omm_csv_string(&exported);
+        let reparsed = from_omm_csv_string(&exported).unwrap();
         assert!(reparsed.is_empty());
     }
 
@@ -4150,9 +4291,10 @@ mod tests {
     #[test]
     fn test_omm_csv_export_string_roundtrip() {
         // Parse the CSV test file, export, and parse the export
-        let original = from_omm_csv_file("test/omm_parsing_cases.csv");
+        let original = from_omm_csv_file("test/omm_parsing_cases.csv")
+            .expect("could not parse test/omm_parsing_cases.csv");
         let exported = to_omm_csv_string(&original);
-        let reparsed = from_omm_csv_string(&exported);
+        let reparsed = from_omm_csv_string(&exported).unwrap();
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4164,12 +4306,13 @@ mod tests {
     #[test]
     fn test_omm_csv_export_file_roundtrip() {
         // Parse the CSV test file and write it back out
-        let original = from_omm_csv_file("test/omm_parsing_cases.csv");
+        let original = from_omm_csv_file("test/omm_parsing_cases.csv")
+            .expect("could not parse test/omm_parsing_cases.csv");
         let out_path = export_test_path("omm_csv.csv");
-        to_omm_csv_file(&original, &out_path);
+        to_omm_csv_file(&original, &out_path).expect("could not write exported CSV file");
 
         // Parse the written file and compare GP fields
-        let reparsed = from_omm_csv_file(&out_path);
+        let reparsed = from_omm_csv_file(&out_path).expect("could not parse exported CSV file");
 
         assert_eq!(original.len(), reparsed.len());
         for (i, (a, b)) in original.iter().zip(reparsed.iter()).enumerate() {
@@ -4238,11 +4381,11 @@ mod tests {
         let lines: [&str; 0] = [];
 
         // Parse missing fields
-        let name: String = kvn_parse(&lines, "OBJECT_NAME");
-        let catalog: i32 = kvn_parse(&lines, "NORAD_CAT_ID");
-        let rev: i64 = kvn_parse(&lines, "REV_AT_EPOCH");
-        let motion: f64 = kvn_parse(&lines, "MEAN_MOTION");
-        let class: char = kvn_parse(&lines, "CLASSIFICATION_TYPE");
+        let name: String = kvn_parse(&lines, "OBJECT_NAME").unwrap();
+        let catalog: i32 = kvn_parse(&lines, "NORAD_CAT_ID").unwrap();
+        let rev: i64 = kvn_parse(&lines, "REV_AT_EPOCH").unwrap();
+        let motion: f64 = kvn_parse(&lines, "MEAN_MOTION").unwrap();
+        let class: char = kvn_parse(&lines, "CLASSIFICATION_TYPE").unwrap();
 
         // Assert numeric fields default to 0, strings to empty, classification to U
         assert_eq!(name, "");

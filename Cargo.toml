@@ -50,3 +50,15 @@ serde_json = { version = "1.0.151", optional = true }
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+
+[[example]]
+name = "propagate_omm_xml"
+required-features = ["xml"]
+
+[[example]]
+name = "propagate_omm_json"
+required-features = ["json"]
+
+[[example]]
+name = "propagate_omm_csv"
+required-features = ["csv"]

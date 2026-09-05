@@ -10,7 +10,7 @@ use std::f64::consts::PI;
 // ------------------
 use crate::common::{CoordinateFrame, StateVector, WGS72, Wgs, calc_period, deg2rad};
 use crate::gp::GenPerturbElementSet;
-use crate::time::{DateTime, utc2jday};
+use crate::time::{DateError, DateTime, utc2jday};
 
 // -------
 // Structs
@@ -486,6 +486,46 @@ pub struct WholeDayResonanceParams {
 // Enums
 // -----
 
+/// SGP4 errors
+///
+/// Failures that can occur while initializing or propagating an SGP4 model.
+/// The element-set variants match Vallado's non-physical orbit checks. The
+/// date variant wraps [`DateError`] when Julian-day conversion fails.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::sgp4::Sgp4Error;
+/// use mako_sgp4::time::DateError;
+///
+/// // A non-UTC datetime is a recoverable SGP4 error
+/// let err = Sgp4Error::InvalidDateTime(DateError::DateNotUTC);
+/// assert_eq!(err, Sgp4Error::InvalidDateTime(DateError::DateNotUTC));
+/// ```
+///
+/// # References
+/// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
+/// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
+#[derive(Debug, Clone, PartialEq)]
+pub enum Sgp4Error {
+    /// Mean motion is less than or equal to zero
+    InvalidMeanMotion,
+
+    /// Mean eccentricity is outside the range 0.0 to 1.0
+    InvalidMeanEccentricity,
+
+    /// Perturbed eccentricity is outside the range 0.0 to 1.0
+    InvalidPerturbedEccentricity,
+
+    /// Semilatus rectum is less than zero
+    InvalidSemilatusRectum,
+
+    /// Satellite has decayed (position radius is less than 1 Earth radius)
+    SatelliteDecayed,
+
+    /// Epoch or propagation datetime could not be converted to Julian date
+    InvalidDateTime(DateError),
+}
+
 // ------
 // Traits
 // ------
@@ -531,11 +571,16 @@ const RPTIM: f64 = 4.375_269_088_011_3e-3;
 /// * `wgs` - Optional, specify World Geodetic System (WGS) parameters (defaults to WGS-72, the standard for TLEs)
 ///
 /// # Returns
-/// * [`Sgp4`] - The time-independent parameters for the SGP4 propagator
+/// * `Ok(Sgp4)` - The time-independent parameters for the SGP4 propagator
+/// * `Err(Sgp4Error)` - If Julian-day conversion or epoch propagation fails
 ///
-/// # Panics
-/// * If the GP epoch datetime is not UTC or Julian-day conversion fails
-/// * If propagation at epoch fails because intermediate elements are non-physical
+/// # Errors
+/// * [`Sgp4Error::InvalidDateTime`] - If the GP epoch datetime is not UTC or Julian-day conversion fails
+/// * [`Sgp4Error::InvalidMeanMotion`] - If mean motion is less than or equal to zero
+/// * [`Sgp4Error::InvalidMeanEccentricity`] - If mean eccentricity is outside the range 0.0 to 1.0
+/// * [`Sgp4Error::InvalidPerturbedEccentricity`] - If perturbed eccentricity is outside the range 0.0 to 1.0
+/// * [`Sgp4Error::InvalidSemilatusRectum`] - If the semilatus rectum is less than zero
+/// * [`Sgp4Error::SatelliteDecayed`] - If the satellite has decayed
 ///
 /// # Examples
 /// ```rust
@@ -550,7 +595,7 @@ const RPTIM: f64 = 4.375_269_088_011_3e-3;
 /// let parsed = from_tle_lines(tle_line1, tle_line2, Some(tle_line0)).unwrap();
 ///
 /// // Initialize the SGP4 propagator (None uses WGS-72)
-/// let sgp4 = init_sgp4(&parsed.gp, Some(&WGS72));
+/// let sgp4 = init_sgp4(&parsed.gp, Some(&WGS72)).unwrap();
 /// assert!(!sgp4.deep_space);
 /// assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
 /// ```
@@ -559,7 +604,7 @@ const RPTIM: f64 = 4.375_269_088_011_3e-3;
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Sgp4 {
+pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Result<Sgp4, Sgp4Error> {
     // Use WGS72 or custom WGS models if provided
     let wgs_sgp4 = if let Some(wgs_passed) = wgs {
         *wgs_passed
@@ -576,7 +621,7 @@ pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Sgp4 {
     let m0 = deg2rad(gp.mean_anomaly); // [rad]
 
     // Extract GP epoch in Julian day format
-    let (jd0, jdfrac0) = utc2jday(&gp.epoch_datetime).unwrap();
+    let (jd0, jdfrac0) = utc2jday(&gp.epoch_datetime).map_err(Sgp4Error::InvalidDateTime)?;
 
     // Recover Brouwer mean motion from Kozai mean motion (mean motion in GP)
     let theta0 = i0.cos();
@@ -669,9 +714,9 @@ pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Sgp4 {
     };
 
     // Propagate to epoch so initialization failures surface through the same checks as propagation
-    let _ = sgp4_prop_delta(&sgp4, 0.0);
+    sgp4_prop_delta(&sgp4, 0.0)?;
 
-    sgp4
+    Ok(sgp4)
 }
 
 /// Initialize the atmospheric drag effects
@@ -1382,17 +1427,23 @@ fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// Propagate an initialized [`Sgp4`] model to a UTC [`DateTime`].
 ///
 /// Converts `datetime` to Julian date, forms minutes since the TLE epoch, then
-/// calls [`sgp4_prop_delta`]. Panics if `datetime` is not UTC or Julian conversion fails.
+/// calls [`sgp4_prop_delta`].
 ///
 /// # Arguments
 /// * `sgp4` - Initialized propagator
 /// * `datetime` - Propagation epoch in UTC
 ///
 /// # Returns
-/// * `StateVector` - TEME position \[km\] and velocity \[km/s\]
+/// * `Ok(StateVector)` - TEME position \[km\] and velocity \[km/s\]
+/// * `Err(Sgp4Error)` - If Julian-day conversion fails or intermediate elements are non-physical
 ///
-/// # Panics
-/// * If `datetime` is not UTC or Julian-day conversion fails
+/// # Errors
+/// * [`Sgp4Error::InvalidDateTime`] - If `datetime` is not UTC or Julian-day conversion fails
+/// * [`Sgp4Error::InvalidMeanMotion`] - If mean motion is less than or equal to zero
+/// * [`Sgp4Error::InvalidMeanEccentricity`] - If mean eccentricity is outside the range 0.0 to 1.0
+/// * [`Sgp4Error::InvalidPerturbedEccentricity`] - If perturbed eccentricity is outside the range 0.0 to 1.0
+/// * [`Sgp4Error::InvalidSemilatusRectum`] - If the semilatus rectum is less than zero
+/// * [`Sgp4Error::SatelliteDecayed`] - If the satellite has decayed
 ///
 /// # Examples
 /// ```rust
@@ -1407,7 +1458,7 @@ fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0)).unwrap();
 ///
 /// // Propagate to the TLE epoch
-/// let state_vector = sgp4_prop_datetime(&sgp4, &sgp4.gp.epoch_datetime);
+/// let state_vector = sgp4_prop_datetime(&sgp4, &sgp4.gp.epoch_datetime).unwrap();
 /// assert_eq!(state_vector.coordinate_frame, CoordinateFrame::TEME);
 /// assert!(state_vector.r_x.is_finite());
 /// ```
@@ -1416,9 +1467,9 @@ fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector {
+pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> Result<StateVector, Sgp4Error> {
     // Convert datetime to Julian day format
-    let (jd_prop, jdfrac_prop) = utc2jday(datetime).unwrap();
+    let (jd_prop, jdfrac_prop) = utc2jday(datetime).map_err(Sgp4Error::InvalidDateTime)?;
 
     // Get minutes since epoch. Subtract whole days and day-fractions separately
     // to avoid floating-point rounding errors
@@ -1432,18 +1483,23 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector {
 ///
 /// Applies secular drag/zonal updates (and deep-space lunar/solar + resonance when
 /// applicable), long-period periodics, then the short-period Kepler / J2 solution.
-/// Panics on non-physical intermediate elements (e.g. mean motion <= 0, eccentricity
-/// out of range, decayed radius), matching Vallado-style checks.
+/// Returns [`Sgp4Error`] on non-physical intermediate elements (e.g. mean motion <= 0,
+/// eccentricity out of range, decayed radius), matching Vallado-style checks.
 ///
 /// # Arguments
 /// * `sgp4` - Initialized propagator
 /// * `delta_t` - Minutes since epoch (may be negative)
 ///
 /// # Returns
-/// * `StateVector` - TEME position \[km\] and velocity \[km/s\]
+/// * `Ok(StateVector)` - TEME position \[km\] and velocity \[km/s\]
+/// * `Err(Sgp4Error)` - If intermediate orbital elements become non-physical
 ///
-/// # Panics
-/// * If intermediate orbital elements become non-physical during propagation
+/// # Errors
+/// * [`Sgp4Error::InvalidMeanMotion`] - If mean motion is less than or equal to zero
+/// * [`Sgp4Error::InvalidMeanEccentricity`] - If mean eccentricity is outside the range 0.0 to 1.0
+/// * [`Sgp4Error::InvalidPerturbedEccentricity`] - If perturbed eccentricity is outside the range 0.0 to 1.0
+/// * [`Sgp4Error::InvalidSemilatusRectum`] - If the semilatus rectum is less than zero
+/// * [`Sgp4Error::SatelliteDecayed`] - If the satellite has decayed
 ///
 /// # Examples
 /// ```rust
@@ -1458,7 +1514,7 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector {
 /// let sgp4 = from_tle_lines(tle_line1, tle_line2, Some(tle_line0)).unwrap();
 ///
 /// // Propagate 6 hours past epoch
-/// let state_vector = sgp4_prop_delta(&sgp4, 360.0);
+/// let state_vector = sgp4_prop_delta(&sgp4, 360.0).unwrap();
 /// assert_eq!(state_vector.coordinate_frame, CoordinateFrame::TEME);
 /// assert!(state_vector.r_x.is_finite());
 /// ```
@@ -1467,7 +1523,7 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> StateVector {
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
-pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
+pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Error> {
     // Create mutable variables for the orbital elements
     let mut m: f64;
     let mut omega: f64;
@@ -1587,7 +1643,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
 
     // Mean motion must remain positive before the drag semi-major-axis update
     if n <= 0.0 {
-        panic!("mean motion {} is less than or equal to zero", n);
+        return Err(Sgp4Error::InvalidMeanMotion);
     }
 
     // Account for remaining atmospheric drag effects
@@ -1625,7 +1681,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
 
     // Mean eccentricity check before the near-zero floor (Vallado)
     if !(-0.001..1.0).contains(&e) {
-        panic!("mean eccentricity {} is outside the range 0.0 to 1.0", e);
+        return Err(Sgp4Error::InvalidMeanEccentricity);
     }
 
     // Vallado eccentricity guard after atmospheric drag
@@ -1693,10 +1749,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
 
         e += delta_e_ls;
         if !(0.0..1.0).contains(&e) {
-            panic!(
-                "perturbed eccentricity {} is outside the range 0.0 to 1.0",
-                e
-            );
+            return Err(Sgp4Error::InvalidPerturbedEccentricity);
         }
         i += delta_i_ls;
 
@@ -1796,7 +1849,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
     e = (axn.powi(2) + ayn.powi(2)).sqrt();
     let pl = a * (1. - e.powi(2));
     if pl < 0.0 {
-        panic!("semilatus rectum {} is less than zero", pl);
+        return Err(Sgp4Error::InvalidSemilatusRectum);
     }
     let cos_ecc_anomaly = (axn * e_omega.cos() + ayn * e_omega.sin()) / e;
     let sin_ecc_anomaly = (axn * e_omega.sin() - ayn * e_omega.cos()) / e;
@@ -1821,10 +1874,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
                 * (3. * i.cos().powi(2) - 1.))
         + delta_r;
     if rk < 1.0 {
-        panic!(
-            "satellite has decayed: position radius {} Earth radii is less than 1.0",
-            rk
-        );
+        return Err(Sgp4Error::SatelliteDecayed);
     }
     let uk = u + delta_u;
     let raan_k = raan + delta_raan;
@@ -1856,7 +1906,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
     let r_dot_y = (r_dot_k * uy + r_f_dot_k * vy) * sgp4.wgs.r_earth_eq / 60.;
     let r_dot_z = (r_dot_k * uz + r_f_dot_k * vz) * sgp4.wgs.r_earth_eq / 60.;
 
-    StateVector {
+    Ok(StateVector {
         r_x: rx,
         r_y: ry,
         r_z: rz,
@@ -1864,7 +1914,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> StateVector {
         v_y: r_dot_y,
         v_z: r_dot_z,
         coordinate_frame: CoordinateFrame::TEME,
-    }
+    })
 }
 
 /// Half day Euler-Maclaurin integration step
@@ -2169,6 +2219,147 @@ mod tests {
         }
     }
 
+    fn iss_sgp4() -> Sgp4 {
+        from_tle_string(
+            "\
+1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+",
+        )
+        .expect("ISS TLE should parse")
+        .into_iter()
+        .next()
+        .expect("ISS TLE should yield one propagator")
+    }
+
+    fn utc_j2000() -> DateTime {
+        DateTime {
+            year: 2000,
+            month: 1,
+            day: 1,
+            hour: 12,
+            minute: 0,
+            second: 0.0,
+            timezone: Timezone::UTC,
+        }
+    }
+
+    #[test]
+    fn test_invalid_date_time() {
+        let mut gp = GenPerturbElementSet {
+            epoch_datetime: DateTime {
+                timezone: Timezone::UT1,
+                ..utc_j2000()
+            },
+            mean_motion: 15.0,
+            ..GenPerturbElementSet::default()
+        };
+        assert!(matches!(
+            init_sgp4(&gp, None),
+            Err(Sgp4Error::InvalidDateTime(DateError::DateNotUTC))
+        ));
+
+        gp.epoch_datetime = DateTime {
+            year: 1500,
+            ..utc_j2000()
+        };
+        assert!(matches!(
+            init_sgp4(&gp, None),
+            Err(Sgp4Error::InvalidDateTime(DateError::DateTooEarly))
+        ));
+
+        let sgp4 = iss_sgp4();
+        let mut datetime = sgp4.gp.epoch_datetime;
+        datetime.timezone = Timezone::UT1;
+        assert!(matches!(
+            sgp4_prop_datetime(&sgp4, &datetime),
+            Err(Sgp4Error::InvalidDateTime(DateError::DateNotUTC))
+        ));
+
+        datetime = DateTime {
+            year: 1500,
+            ..utc_j2000()
+        };
+        assert!(matches!(
+            sgp4_prop_datetime(&sgp4, &datetime),
+            Err(Sgp4Error::InvalidDateTime(DateError::DateTooEarly))
+        ));
+    }
+
+    #[test]
+    fn test_invalid_mean_motion() {
+        let gp = GenPerturbElementSet {
+            epoch_datetime: utc_j2000(),
+            mean_motion: 0.0,
+            ..GenPerturbElementSet::default()
+        };
+        assert!(matches!(
+            init_sgp4(&gp, None),
+            Err(Sgp4Error::InvalidMeanMotion)
+        ));
+
+        let mut sgp4 = iss_sgp4();
+        sgp4.brouwer0.n = 0.0;
+        assert!(matches!(
+            sgp4_prop_delta(&sgp4, 0.0),
+            Err(Sgp4Error::InvalidMeanMotion)
+        ));
+    }
+
+    #[test]
+    fn test_invalid_mean_eccentricity() {
+        let mut sgp4 = iss_sgp4();
+        sgp4.brouwer0.e = 1.5;
+        assert!(matches!(
+            sgp4_prop_delta(&sgp4, 0.0),
+            Err(Sgp4Error::InvalidMeanEccentricity)
+        ));
+
+        sgp4.brouwer0.e = -0.5;
+        assert!(matches!(
+            sgp4_prop_delta(&sgp4, 0.0),
+            Err(Sgp4Error::InvalidMeanEccentricity)
+        ));
+    }
+
+    #[test]
+    fn test_invalid_perturbed_eccentricity() {
+        let mut sgp4 = iss_sgp4();
+        sgp4.deep_space = true;
+        sgp4.lunar_params.c = 1.0e6;
+        sgp4.lunar_params.x1 = 1.0;
+        sgp4.lunar_params.x2 = 1.0;
+        sgp4.lunar_params.x3 = 1.0;
+        sgp4.lunar_params.x4 = 1.0;
+
+        assert!(matches!(
+            sgp4_prop_delta(&sgp4, 0.0),
+            Err(Sgp4Error::InvalidPerturbedEccentricity)
+        ));
+    }
+
+    #[test]
+    fn test_invalid_semilatus_rectum() {
+        let mut sgp4 = iss_sgp4();
+        sgp4.brouwer0.e = 0.9999;
+
+        assert!(matches!(
+            sgp4_prop_delta(&sgp4, 0.0),
+            Err(Sgp4Error::InvalidSemilatusRectum)
+        ));
+    }
+
+    #[test]
+    fn test_satellite_decayed() {
+        let mut sgp4 = iss_sgp4();
+        sgp4.brouwer0.n = 1.0;
+
+        assert!(matches!(
+            sgp4_prop_delta(&sgp4, 0.0),
+            Err(Sgp4Error::SatelliteDecayed)
+        ));
+    }
+
     #[test]
     fn test_sgp4_vallado_cases() {
         let content = std::fs::read_to_string("test/vallado_cases.toml")
@@ -2183,10 +2374,9 @@ mod tests {
             let case = &cases.test[key];
 
             if case.exception {
-                let result = std::panic::catch_unwind(|| from_tle_string(&case.tle));
                 assert!(
-                    result.is_err(),
-                    "case {key}: expected initialization to panic"
+                    from_tle_string(&case.tle).is_err(),
+                    "case {key}: expected initialization to return Err"
                 );
                 continue;
             }
@@ -2197,7 +2387,9 @@ mod tests {
 
             for row in parse_vallado_ephem(&case.ephem, sgp4.gp.epoch_datetime) {
                 // Propagate using the delta time
-                let state_delta = sgp4_prop_delta(sgp4, row.t_mins);
+                let state_delta = sgp4_prop_delta(sgp4, row.t_mins).unwrap_or_else(|err| {
+                    panic!("{key}: {} at t_mins={}: {err:?}", case.name, row.t_mins)
+                });
                 assert_state_near(key, &case.name, row.t_mins, &state_delta, &row);
 
                 // Propagate using the datetime. Align the printed stamp to t_mins
@@ -2205,7 +2397,12 @@ mod tests {
                 // reference ephemeris
                 let datetime =
                     align_datetime_to_t_mins(row.datetime, sgp4.jd0, sgp4.jdfrac0, row.t_mins);
-                let state_datetime = sgp4_prop_datetime(sgp4, &datetime);
+                let state_datetime = sgp4_prop_datetime(sgp4, &datetime).unwrap_or_else(|err| {
+                    panic!(
+                        "{key}: {} datetime at t_mins={}: {err:?}",
+                        case.name, row.t_mins
+                    )
+                });
                 assert_state_near(key, &case.name, row.t_mins, &state_datetime, &row);
             }
         }
