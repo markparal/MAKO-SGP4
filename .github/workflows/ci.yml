@@ -24,3 +24,20 @@ jobs:
     - run: cargo test --no-default-features
     - run: cargo doc --no-deps
     - run: cargo package --list
+    - name: Run examples
+      run: |
+        set -euo pipefail
+        mapfile -t examples < <(
+          cargo metadata --format-version 1 --no-deps \
+            | jq -r '.packages[] | select(.name == "mako-sgp4") | .targets[] | select(.kind[] == "example") | .name'
+        )
+        if [ ${#examples[@]} -eq 0 ]; then
+          echo "No examples found"
+          exit 1
+        fi
+        cargo build --examples --all-features
+        for name in "${examples[@]}"; do
+          echo "::group::cargo run --example ${name}"
+          cargo run --all-features --example "${name}"
+          echo "::endgroup::"
+        done
