@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/markparal/MAKO-SGP4/HEAD/assets/logo_dark.png" alt="MAKO-SGP4 logo" width="240">
+</p>
+
 # MAKO-SGP4
 
 [![Build status](https://github.com/markparal/MAKO-SGP4/actions/workflows/ci.yml/badge.svg)](https://github.com/markparal/MAKO-SGP4/actions/workflows/ci.yml)
